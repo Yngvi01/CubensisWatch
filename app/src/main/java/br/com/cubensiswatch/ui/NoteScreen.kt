@@ -7,6 +7,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -14,9 +16,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.com.cubensiswatch.data.Note
 import br.com.cubensiswatch.data.NotePhoto
+import br.com.cubensiswatch.data.NoteLink
 import java.text.DateFormat
 
 data class NoteRecordOption(val type: String, val id: Long, val label: String)
+private val knowledgeTypes = listOf("Anotação livre", "Procedimento", "Referência", "Hipótese", "Conclusão")
+private val hypothesisOutcomes = listOf("Em aberto", "Apoiou", "Não apoiou", "Inconclusiva")
 
 @Composable
 fun NoteScreen(viewModel: NoteViewModel, relatedRecords: List<NoteRecordOption>) {
@@ -29,7 +34,9 @@ fun NoteScreen(viewModel: NoteViewModel, relatedRecords: List<NoteRecordOption>)
     var pendingPhotoNote by remember { mutableStateOf<Note?>(null) }
     var pendingPhotoUris by remember { mutableStateOf(emptyList<Uri>()) }
     var photoCaption by remember { mutableStateOf("") }
+    var selectedType by remember { mutableStateOf("Todas") }
     val notes by viewModel.search(query).collectAsStateWithLifecycle(initialValue = emptyList())
+    val links by viewModel.links().collectAsStateWithLifecycle(initialValue = emptyList())
     val error by viewModel.error.collectAsStateWithLifecycle()
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { selected: List<Uri> ->
         if (selected.isNotEmpty()) {
@@ -43,25 +50,38 @@ fun NoteScreen(viewModel: NoteViewModel, relatedRecords: List<NoteRecordOption>)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text("Anotações", style = MaterialTheme.typography.headlineMedium)
+                Text("Caderno de conhecimento", style = MaterialTheme.typography.headlineMedium)
                 Button(onClick = { editing = null; editorOpen = true }) { Text("＋ Nova") }
             }
         }
+        item { Text("Procedimentos, referências e hipóteses ligados aos seus registros de cultivo.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("Buscar em título, texto e tags") }) }
+        item { NoteTypeFilter(selectedType) { selectedType = it } }
         if (error != null) item { Text(error!!, color = MaterialTheme.colorScheme.error) }
-        if (notes.isEmpty()) item {
+        val visibleNotes = notes.filter { selectedType == "Todas" || it.noteType == selectedType }
+        if (visibleNotes.isEmpty()) item {
             Text(if (query.isBlank()) "Nenhuma anotação ainda. Registre uma ideia ou detalhe do seu cultivo." else "Nenhuma anotação corresponde à busca.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        items(notes, key = { it.id }) { note ->
+        items(visibleNotes, key = { it.id }) { note ->
             val photos by viewModel.photos(note.id).collectAsStateWithLifecycle(initialValue = emptyList())
+            val noteLinks = links.filter { it.noteId == note.id }
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(note.noteType, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     Text(note.title, style = MaterialTheme.typography.titleMedium)
                     Text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(note.updatedAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(note.text, style = MaterialTheme.typography.bodyMedium)
+                    if (note.noteType == "Hipótese") {
+                        Text("Hipótese: ${note.hypothesis}", style = MaterialTheme.typography.bodyMedium)
+                        if (note.findings.isNotBlank()) Text("Resultados e evidências: ${note.findings}", style = MaterialTheme.typography.bodyMedium)
+                        Text("Avaliação: ${note.hypothesisOutcome ?: "Em aberto"}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
+                    }
                     if (note.tags.isNotBlank()) Text("Tags: ${note.tags}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    val related = relatedRecords.firstOrNull { it.type == note.relatedType && it.id == note.relatedId }
-                    if (related != null) Text("Relacionado: ${related.label}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val linked = noteLinks.mapNotNull { link -> relatedRecords.firstOrNull { it.type == link.relatedType && it.id == link.relatedId } }
+                    if (linked.isNotEmpty()) {
+                        Text("Registros relacionados", style = MaterialTheme.typography.labelLarge)
+                        linked.forEach { relation -> Text("• ${relation.label}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
                     OutlinedButton(onClick = {
                         noteForPhotoPicker = note
                         photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -80,9 +100,10 @@ fun NoteScreen(viewModel: NoteViewModel, relatedRecords: List<NoteRecordOption>)
 
     if (editorOpen) NoteEditorDialog(
         initial = editing,
+        initialLinks = editing?.let { note -> links.filter { it.noteId == note.id } }.orEmpty(),
         relatedRecords = relatedRecords,
         onDismiss = { editorOpen = false; editing = null },
-        onSave = { note -> viewModel.save(note) { editorOpen = false; editing = null } },
+        onSave = { note, noteLinks -> viewModel.save(note, noteLinks) { editorOpen = false; editing = null } },
     )
     deleteTarget?.let { note ->
         AlertDialog(
@@ -130,51 +151,98 @@ fun NoteScreen(viewModel: NoteViewModel, relatedRecords: List<NoteRecordOption>)
 @Composable
 private fun NoteEditorDialog(
     initial: Note?,
+    initialLinks: List<NoteLink>,
     relatedRecords: List<NoteRecordOption>,
     onDismiss: () -> Unit,
-    onSave: (Note) -> Unit,
+    onSave: (Note, List<NoteLink>) -> Unit,
 ) {
     var title by remember(initial?.id) { mutableStateOf(initial?.title.orEmpty()) }
     var text by remember(initial?.id) { mutableStateOf(initial?.text.orEmpty()) }
     var tags by remember(initial?.id) { mutableStateOf(initial?.tags.orEmpty()) }
-    var related by remember(initial?.id) {
-        mutableStateOf(initial?.let { note -> relatedRecords.firstOrNull { it.type == note.relatedType && it.id == note.relatedId } })
+    var noteType by remember(initial?.id) { mutableStateOf(initial?.noteType ?: knowledgeTypes.first()) }
+    var hypothesis by remember(initial?.id) { mutableStateOf(initial?.hypothesis.orEmpty()) }
+    var findings by remember(initial?.id) { mutableStateOf(initial?.findings.orEmpty()) }
+    var outcome by remember(initial?.id) { mutableStateOf(initial?.hypothesisOutcome ?: hypothesisOutcomes.first()) }
+    var selectedRecords by remember(initial?.id) {
+        mutableStateOf(initialLinks.mapNotNull { link -> relatedRecords.firstOrNull { it.type == link.relatedType && it.id == link.relatedId } })
     }
     var recordMenu by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Nova anotação" else "Editar anotação") },
+        title = { Text(if (initial == null) "Nova entrada no caderno" else "Editar entrada") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.heightIn(max = 540.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                NoteTypeSelector(noteType, onSelect = { noteType = it })
                 OutlinedTextField(title, { title = it }, label = { Text("Título *") }, singleLine = true)
-                OutlinedTextField(text, { text = it }, label = { Text("Anotação *") }, minLines = 4)
+                OutlinedTextField(text, { text = it }, label = { Text("Conteúdo / contexto *") }, minLines = 3)
+                if (noteType == "Hipótese") {
+                    OutlinedTextField(hypothesis, { hypothesis = it }, label = { Text("Hipótese a acompanhar *") }, minLines = 2)
+                    OutlinedTextField(findings, { findings = it }, label = { Text("Resultados e evidências observados") }, minLines = 3)
+                    NoteTypeSelector(outcome, { outcome = it }, hypothesisOutcomes, "Avaliação da hipótese")
+                }
                 OutlinedTextField(tags, { tags = it }, label = { Text("Tags separadas por vírgula") }, singleLine = true)
                 Box {
                     OutlinedButton(onClick = { recordMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(related?.label ?: "Vincular a um registro (opcional)")
+                        Text(if (selectedRecords.isEmpty()) "Vincular registros (opcional)" else "${selectedRecords.size} registro(s) relacionado(s)")
                     }
                     DropdownMenu(expanded = recordMenu, onDismissRequest = { recordMenu = false }) {
-                        DropdownMenuItem(text = { Text("Sem vínculo") }, onClick = { related = null; recordMenu = false })
                         relatedRecords.forEach { option ->
-                            DropdownMenuItem(text = { Text(option.label) }, onClick = { related = option; recordMenu = false })
+                            val checked = selectedRecords.any { it.type == option.type && it.id == option.id }
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                leadingIcon = { Checkbox(checked = checked, onCheckedChange = null) },
+                                onClick = {
+                                    selectedRecords = if (checked) selectedRecords.filterNot { it.type == option.type && it.id == option.id }
+                                    else selectedRecords + option
+                                },
+                            )
                         }
                     }
                 }
+                if (selectedRecords.isNotEmpty()) Text("Vinculados: ${selectedRecords.joinToString { it.label }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                onSave(Note(
-                    id = initial?.id ?: 0,
-                    title = title,
-                    text = text,
-                    createdAt = initial?.createdAt ?: System.currentTimeMillis(),
-                    tags = tags,
-                    relatedType = related?.type,
-                    relatedId = related?.id,
-                ))
-            }, enabled = title.isNotBlank() && text.isNotBlank()) { Text("Salvar") }
+                onSave(
+                    Note(
+                        id = initial?.id ?: 0,
+                        title = title,
+                        text = text,
+                        createdAt = initial?.createdAt ?: System.currentTimeMillis(),
+                        tags = tags,
+                        relatedType = selectedRecords.firstOrNull()?.type,
+                        relatedId = selectedRecords.firstOrNull()?.id,
+                        noteType = noteType,
+                        hypothesis = hypothesis,
+                        findings = findings,
+                        hypothesisOutcome = if (noteType == "Hipótese") outcome else null,
+                    ),
+                    selectedRecords.map { NoteLink(noteId = initial?.id ?: 0, relatedType = it.type, relatedId = it.id) },
+                )
+            }, enabled = title.isNotBlank() && text.isNotBlank() && (noteType != "Hipótese" || hypothesis.isNotBlank())) { Text("Salvar") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
+}
+
+@Composable
+private fun NoteTypeSelector(
+    selected: String,
+    onSelect: (String) -> Unit,
+    options: List<String> = knowledgeTypes,
+    label: String = "Tipo",
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("$label: $selected") }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { onSelect(option); expanded = false }) }
+        }
+    }
+}
+
+@Composable
+private fun NoteTypeFilter(selected: String, onSelect: (String) -> Unit) {
+    NoteTypeSelector(selected, onSelect, listOf("Todas") + knowledgeTypes, "Filtrar")
 }

@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Cultivation::class, Culture::class, Lineage::class, CulturePhoto::class, CultivationEvent::class, Photo::class, Incubator::class, IncubatorReading::class, Material::class, StockMovement::class, ShoppingItem::class, Reminder::class, Harvest::class, HarvestPhoto::class, Note::class, NotePhoto::class, MaterialPhoto::class, CultivationExperiment::class, CultureEvent::class], version = 13, exportSchema = true)
+@Database(entities = [Cultivation::class, Culture::class, Lineage::class, CulturePhoto::class, CultivationEvent::class, Photo::class, Incubator::class, IncubatorReading::class, Material::class, StockMovement::class, ShoppingItem::class, Reminder::class, Harvest::class, HarvestPhoto::class, Note::class, NotePhoto::class, MaterialPhoto::class, CultivationExperiment::class, CultureEvent::class, NoteLink::class], version = 14, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun cultivationDao(): CultivationDao
     abstract fun eventDao(): CultivationEventDao
@@ -25,6 +25,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun materialPhotoDao(): MaterialPhotoDao
     abstract fun cultivationExperimentDao(): CultivationExperimentDao
     abstract fun cultureEventDao(): CultureEventDao
+    abstract fun noteLinkDao(): NoteLinkDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -157,6 +158,18 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("INSERT INTO culture_events (cultureId, type, description, occurredAt, status, sourceCultureCode) SELECT c.id, CASE WHEN c.createdAt > 0 THEN CASE WHEN c.parentCultureId IS NULL THEN 'Registro inicial' ELSE 'Transferência' END ELSE 'Histórico inicial' END, CASE WHEN c.createdAt <= 0 THEN 'Histórico iniciado na atualização; data original de criação não registrada' WHEN c.parentCultureId IS NULL THEN 'Amostra registrada' ELSE 'Amostra derivada de ' || COALESCE(p.code, 'origem não identificada') END, CASE WHEN c.createdAt > 0 THEN c.createdAt ELSE CAST(strftime('%s','now') AS INTEGER) * 1000 END, c.status, p.code FROM cultures c LEFT JOIN cultures p ON p.id = c.parentCultureId")
             }
         }
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE notes ADD COLUMN noteType TEXT NOT NULL DEFAULT 'Anotação livre'")
+                db.execSQL("ALTER TABLE notes ADD COLUMN hypothesis TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE notes ADD COLUMN findings TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE notes ADD COLUMN hypothesisOutcome TEXT")
+                db.execSQL("CREATE TABLE IF NOT EXISTS note_links (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, noteId INTEGER NOT NULL, relatedType TEXT NOT NULL, relatedId INTEGER NOT NULL, FOREIGN KEY(noteId) REFERENCES notes(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_note_links_noteId ON note_links(noteId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_note_links_noteId_relatedType_relatedId ON note_links(noteId, relatedType, relatedId)")
+                db.execSQL("INSERT OR IGNORE INTO note_links (noteId, relatedType, relatedId) SELECT id, relatedType, relatedId FROM notes WHERE relatedType IS NOT NULL AND relatedId IS NOT NULL")
+            }
+        }
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
     }
 }

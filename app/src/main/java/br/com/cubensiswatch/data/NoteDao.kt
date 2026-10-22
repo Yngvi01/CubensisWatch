@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface NoteDao {
-    @Query("SELECT * FROM notes WHERE (:query = '' OR title LIKE '%' || :query || '%' OR text LIKE '%' || :query || '%' OR tags LIKE '%' || :query || '%') ORDER BY updatedAt DESC")
+    @Query("SELECT * FROM notes WHERE (:query = '' OR title LIKE '%' || :query || '%' OR text LIKE '%' || :query || '%' OR tags LIKE '%' || :query || '%' OR hypothesis LIKE '%' || :query || '%' OR findings LIKE '%' || :query || '%' OR noteType LIKE '%' || :query || '%') ORDER BY updatedAt DESC")
     fun observeSearch(query: String): Flow<List<Note>>
 
     @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")

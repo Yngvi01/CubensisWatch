@@ -556,11 +556,15 @@ Os lembretes são independentes do alerta de estoque mínimo.
 
 # 18. Anotações
 
-Criar uma área de anotações gerais.
+Criar uma área de anotações gerais integrada ao caderno de conhecimento pessoal.
 
 Uma anotação pode ser:
 
 * Livre
+* Procedimento
+* Referência
+* Hipótese acompanhada por evidências e conclusão
+* Conclusão
 * Ligada a cultivo
 * Ligada a cultura
 * Ligada a linhagem
@@ -573,7 +577,7 @@ Campos:
 * Data
 * Tags
 * Fotos
-* Registro relacionado
+* Um ou mais registros relacionados
 
 Adicionar busca por texto.
 
@@ -1063,7 +1067,7 @@ Atualizado em 22/10/2026, após a implementação de fotos locais vinculadas aos
 - Aplicativo Android nativo em Kotlin, Compose, Material 3, Navigation Compose, Room, ViewModel/Flow e WorkManager; os dados principais ficam em banco local.
 - Cultivos: criação, edição, exclusão com confirmação, lista, detalhes, status e timeline; observação rápida ou problema com texto, foto opcional, temperatura/umidade opcionais, etapa automática e data/hora; fotos locais com legenda, seleção múltipla, câmera, zoom por pinça/toque duplo e comparação lado a lado com datas e timeline visual; ficha opcional de experimento separando condições planejadas e observadas, materiais/quantidades, duração planejada/real por etapa, resultado e notas, com resumo de fichas anteriores de cultivos da mesma linhagem, cultura de origem ou espécie.
 - Colheitas: registros numerados por cultivo, data, quantidade, unidade, observação e fotos locais vinculadas; fotos podem vir da galeria ou câmera e podem ser ampliadas com zoom; totais agrupados por unidade; migrações Room da versão 6 para 8 preservam os dados existentes.
-- Anotações: criar, editar, excluir e buscar por título, texto ou tags; tags são normalizadas e é possível vincular uma anotação a cultivo, cultura, linhagem ou material; migração Room da versão 8 para 9 preserva dados existentes.
+- Caderno de conhecimento integrado às anotações: entradas livres, procedimentos, referências, hipóteses e conclusões; hipóteses guardam evidências e avaliação (em aberto, apoiou, não apoiou ou inconclusiva); vínculo múltiplo com cultivos, culturas, linhagens e materiais; busca e filtro por tipo; migração Room 13→14 preserva anotações e vínculos anteriores.
 - Anotações aceitam fotos locais pela galeria, com legenda opcional, visualização ampliada, exclusão e remoção dos arquivos ao excluir a foto ou anotação; migração Room da versão 9 para 10.
 - Busca local geral por texto em cultivos, culturas, linhagens, materiais e anotações, acessível pelo Dashboard e pela área “Mais”. Resultados de cultivos, culturas e linhagens abrem seus detalhes.
 - Busca permite filtrar por categoria, status/espécie/tipo/categoria/tag conforme o registro, além de intervalo de datas.

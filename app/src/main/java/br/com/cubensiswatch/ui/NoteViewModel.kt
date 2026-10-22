@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import android.net.Uri
 import br.com.cubensiswatch.data.Note
 import br.com.cubensiswatch.data.NotePhoto
+import br.com.cubensiswatch.data.NoteLink
 import br.com.cubensiswatch.data.NoteRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,12 +17,14 @@ class NoteViewModel(private val repository: NoteRepository) : ViewModel() {
     val error = _error.asStateFlow()
 
     fun search(query: String) = repository.search(query)
+    fun links() = repository.links()
+    fun links(noteId: Long) = repository.links(noteId)
     fun photos(noteId: Long) = repository.photos(noteId)
     fun clearError() { _error.value = null }
 
-    fun save(note: Note, onSaved: () -> Unit = {}) = viewModelScope.launch {
+    fun save(note: Note, links: List<NoteLink> = emptyList(), onSaved: () -> Unit = {}) = viewModelScope.launch {
         _error.value = null
-        runCatching { repository.save(note) }
+        runCatching { repository.save(note, links) }
             .onSuccess { onSaved() }
             .onFailure { _error.value = it.message ?: "Não foi possível salvar a anotação." }
     }
