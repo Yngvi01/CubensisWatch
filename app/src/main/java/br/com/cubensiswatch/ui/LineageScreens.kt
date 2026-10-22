@@ -28,6 +28,7 @@ import java.io.File
 val cultureTypes = listOf("Cultura líquida", "Ágar", "Spawn", "Matriz", "Outro")
 val cultureStatuses = listOf("Ativo", "Em observação", "Suspeita de contaminação", "Contaminado", "Descartado", "Arquivado")
 private val lineageDateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy").withZone(ZoneId.systemDefault())
+private val lineageDateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy · HH:mm").withZone(ZoneId.systemDefault())
 
 @Composable
 fun LineageListScreen(viewModel: LineageViewModel, onCreate: () -> Unit, onOpen: (Long) -> Unit) {
@@ -72,10 +73,13 @@ fun LineageEditorScreen(initial: Lineage?, viewModel: LineageViewModel, onSaved:
     var description by remember(initial?.id) { mutableStateOf(initial?.description.orEmpty()) }
     val error by viewModel.error.collectAsStateWithLifecycle()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text(if (initial == null) "Nova linhagem" else "Editar linhagem", style = MaterialTheme.typography.headlineMedium) }
+        item {
+            Text(if (initial == null) "Nova linhagem genética" else "Editar linhagem genética", style = MaterialTheme.typography.headlineMedium)
+            Text("A linhagem representa a identidade genética; cada cultura é uma amostra física separada.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (error != null) item { PhaseError(error!!) { viewModel.clearError() } }
         item { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nome *") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
-        item { OutlinedTextField(value = code, onValueChange = { code = it }, label = { Text("Código (gerado se vazio)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { OutlinedTextField(value = code, onValueChange = { code = it }, label = { Text("Identificador único (gerado se vazio)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(value = species, onValueChange = { species = it }, label = { Text("Espécie") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(value = variety, onValueChange = { variety = it }, label = { Text("Variedade") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Descrição / origem") }, modifier = Modifier.fillMaxWidth(), minLines = 3) }
@@ -110,6 +114,7 @@ fun LineageDetailScreen(
     val item = lineage!!
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
+            Text("Identidade genética", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) {
                     Text(item.name, style = MaterialTheme.typography.headlineMedium)
@@ -121,6 +126,7 @@ fun LineageDetailScreen(
         }
         if (error != null) item { PhaseError(error!!) { viewModel.clearError() } }
         item { Button(onClick = { onAddCulture(item.id) }, modifier = Modifier.fillMaxWidth()) { Text("＋ Nova cultura derivada") } }
+        item { Text("Cada cultura é uma amostra física independente vinculada a esta linhagem genética.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Text("Árvore da linhagem", style = MaterialTheme.typography.titleLarge) }
         if (cultures.isEmpty() && cultivations.isEmpty()) {
             item { Text("Ainda não há culturas ou cultivos ligados a esta linhagem.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -221,10 +227,13 @@ fun CultureEditorScreen(
     var notes by remember(initial?.id) { mutableStateOf(initial?.notes.orEmpty()) }
     val error by viewModel.error.collectAsStateWithLifecycle()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text(if (initial == null) "Nova cultura" else "Editar cultura", style = MaterialTheme.typography.headlineMedium) }
+        item {
+            Text(if (initial == null) "Nova amostra física" else "Editar amostra física", style = MaterialTheme.typography.headlineMedium)
+            Text("Esta amostra tem identidade e histórico próprios, separados da linhagem genética.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (error != null) item { PhaseError(error!!) { viewModel.clearError() } }
         item { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nome *") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
-        item { OutlinedTextField(value = code, onValueChange = { code = it }, label = { Text("Código (gerado se vazio)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        item { OutlinedTextField(value = code, onValueChange = { code = it }, label = { Text("Identificador único (gerado se vazio)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(value = species, onValueChange = { species = it }, label = { Text("Espécie") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { OutlinedTextField(value = variety, onValueChange = { variety = it }, label = { Text("Variedade") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
         item { ChoiceSelector("Tipo", type, cultureTypes) { type = it } }
@@ -259,13 +268,15 @@ fun CultureEditorScreen(
 }
 
 @Composable
-fun CultureDetailScreen(id: Long, viewModel: LineageViewModel, onEdit: () -> Unit, onDeleted: () -> Unit, onNewCultivation: (Long, Long) -> Unit) {
+fun CultureDetailScreen(id: Long, viewModel: LineageViewModel, onEdit: () -> Unit, onDeleted: () -> Unit, onCulture: (Long) -> Unit, onNewCultivation: (Long, Long) -> Unit) {
     val culture by viewModel.culture(id).collectAsStateWithLifecycle(initialValue = null)
     val photos by viewModel.culturePhotos(id).collectAsStateWithLifecycle(initialValue = emptyList())
+    val events by viewModel.cultureEvents(id).collectAsStateWithLifecycle(initialValue = emptyList())
     val lineages by viewModel.lineages.collectAsStateWithLifecycle(initialValue = emptyList())
     val cultures by viewModel.cultures.collectAsStateWithLifecycle(initialValue = emptyList())
     val error by viewModel.error.collectAsStateWithLifecycle()
     var caption by remember { mutableStateOf("") }
+    var comparisonOpen by remember { mutableStateOf(false) }
     var deleteConfirm by remember { mutableStateOf(false) }
     var captureFile by remember { mutableStateOf<File?>(null) }
     val context = LocalContext.current
@@ -286,6 +297,8 @@ fun CultureDetailScreen(id: Long, viewModel: LineageViewModel, onEdit: () -> Uni
     val item = culture!!
     val parent = cultures.firstOrNull { it.id == item.parentCultureId }
     val lineage = lineages.firstOrNull { it.id == item.lineageId }
+    val siblings = cultures.filter { it.id != item.id && it.lineageId == item.lineageId && it.parentCultureId == item.parentCultureId }
+    val descendants = cultureDescendants(item.id, cultures)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -297,15 +310,27 @@ fun CultureDetailScreen(id: Long, viewModel: LineageViewModel, onEdit: () -> Uni
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(item.status, color = MaterialTheme.colorScheme.primary)
-                    Text("Linhagem: ${lineage?.name ?: "Não vinculada"}")
-                    Text("Origem: ${parent?.name ?: item.origin.ifBlank { "Registro inicial" }}")
-                    Text("Criada em ${lineageDateFormatter.format(Instant.ofEpochMilli(item.createdAt))}")
+                    Text("Amostra física · ${item.status}", color = MaterialTheme.colorScheme.primary)
+                    Text("Identificador único: ${item.code}")
+                    Text("Linhagem genética: ${lineage?.name ?: "Não vinculada"}")
+                    Text("Origem: ${parent?.let { "${it.code} · ${it.name}" } ?: item.origin.ifBlank { "Registro inicial" }}")
+                    Text(if (item.createdAt > 0) "Criada / transferida em ${lineageDateTimeFormatter.format(Instant.ofEpochMilli(item.createdAt))}" else "Data original de criação não registrada")
                     if (item.location.isNotBlank()) Text("Local: ${item.location}")
                     if (item.incubator.isNotBlank()) Text("Incubadora: ${item.incubator}")
                     if (item.notes.isNotBlank()) Text(item.notes)
                 }
             }
+        }
+        if (parent != null) item {
+            OutlinedButton(onClick = { onCulture(parent.id) }, modifier = Modifier.fillMaxWidth()) { Text("← Abrir origem · ${parent.code} · ${parent.name}") }
+        }
+        if (siblings.isNotEmpty()) item { Text(if (parent == null) "Outras amostras iniciais da linhagem" else "Amostras irmãs", style = MaterialTheme.typography.titleMedium) }
+        items(siblings, key = { "culture-sibling-${it.id}" }) { sibling ->
+            CultureRelationCard(sibling, onClick = { onCulture(sibling.id) })
+        }
+        if (descendants.isNotEmpty()) item { Text("Descendentes", style = MaterialTheme.typography.titleMedium) }
+        items(descendants, key = { "culture-descendant-${it.culture.id}" }) { descendant ->
+            CultureRelationCard(descendant.culture, "Derivada · nível ${descendant.depth}") { onCulture(descendant.culture.id) }
         }
         if (item.lineageId != null) item {
             Button(onClick = { onNewCultivation(item.lineageId!!, item.id) }, modifier = Modifier.fillMaxWidth()) { Text("＋ Criar cultivo derivado") }
@@ -329,23 +354,76 @@ fun CultureDetailScreen(id: Long, viewModel: LineageViewModel, onEdit: () -> Uni
                 }
             }, modifier = Modifier.fillMaxWidth()) { Text("＋ Tirar foto") }
         }
-        item { Text("Fotos", style = MaterialTheme.typography.titleLarge) }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Fotos · linha do tempo", style = MaterialTheme.typography.titleLarge)
+                if (photos.size >= 2) TextButton(onClick = { comparisonOpen = true }) { Text("Comparar") }
+            }
+        }
         if (photos.isEmpty()) item { Text("Nenhuma foto registrada.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         items(photos, key = { "culture-photo-${it.id}" }) { photo -> CulturePhotoCard(photo) { viewModel.deleteCulturePhoto(photo) } }
+        item { Text("Histórico de procedência e estado", style = MaterialTheme.typography.titleLarge) }
+        if (events.isEmpty()) item { Text("Ainda não há alterações registradas.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        items(events, key = { "culture-event-${it.id}" }) { event ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(event.type, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                        Text(lineageDateTimeFormatter.format(Instant.ofEpochMilli(event.occurredAt)), style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text(event.description)
+                    event.status?.let { Text("Estado registrado: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+            }
+        }
         item {
             OutlinedButton(onClick = { deleteConfirm = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Excluir cultura") }
         }
     }
     if (deleteConfirm) AlertDialog(
         onDismissRequest = { deleteConfirm = false }, title = { Text("Excluir cultura?") },
-        text = { Text("As fotos locais desta cultura serão excluídas. Derivados e cultivos relacionados serão preservados e ficarão sem esse registro de origem.") },
+        text = { Text("A amostra só pode ser excluída quando não tiver derivados nem cultivos vinculados. Para manter a procedência, altere o estado para Arquivado ou Descartado.") },
         confirmButton = { TextButton(onClick = { deleteConfirm = false; viewModel.deleteCulture(item, onDeleted) }) { Text("Excluir", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = { deleteConfirm = false }) { Text("Cancelar") } },
+    )
+    if (comparisonOpen && photos.size >= 2) PhotoComparisonDialog(
+        photos = photos.map { ComparisonImage(it.id, it.localPath, it.caption, it.capturedAt) },
+        onDismiss = { comparisonOpen = false },
     )
 }
 
 @Composable
 private fun CulturePhotoCard(photo: CulturePhoto, onDelete: () -> Unit) = LocalPhotoCard(photo.localPath, photo.caption, photo.capturedAt, onDelete)
+
+private data class CultureDescendant(val culture: Culture, val depth: Int)
+
+private fun cultureDescendants(rootId: Long, cultures: List<Culture>): List<CultureDescendant> {
+    val result = mutableListOf<CultureDescendant>()
+    val visited = mutableSetOf(rootId)
+    var frontier = listOf(rootId)
+    var depth = 1
+    while (frontier.isNotEmpty()) {
+        val children = cultures.filter { it.parentCultureId != null && it.parentCultureId in frontier && visited.add(it.id) }
+        if (children.isEmpty()) break
+        result += children.map { CultureDescendant(it, depth) }
+        frontier = children.map { it.id }
+        depth++
+    }
+    return result
+}
+
+@Composable
+private fun CultureRelationCard(culture: Culture, relation: String = "Amostra", onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("$relation · ${culture.code}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(culture.name, style = MaterialTheme.typography.titleSmall)
+            }
+            Text(culture.status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
 
 @Composable
 private fun ChoiceSelector(label: String, selected: String, options: List<String>, onSelect: (String) -> Unit) {

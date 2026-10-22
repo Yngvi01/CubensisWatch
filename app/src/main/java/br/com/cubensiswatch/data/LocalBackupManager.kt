@@ -27,9 +27,9 @@ class LocalBackupManager(
     private val appContext = context.applicationContext
     private val photoTables = listOf("photos", "culture_photos", "harvest_photos", "note_photos", "material_photos")
     private val tableOrder = listOf(
-        "lineages", "incubators", "cultivations", "cultures", "materials", "reminders",
+        "lineages", "incubators", "cultivations", "cultures", "culture_events", "materials", "reminders",
         "incubator_readings", "cultivation_events", "photos", "culture_photos",
-        "stock_movements", "shopping_items", "harvests", "harvest_photos", "notes", "note_photos", "material_photos",
+        "stock_movements", "shopping_items", "harvests", "harvest_photos", "notes", "note_photos", "material_photos", "cultivation_experiments",
     )
     private val deleteOrder = tableOrder.asReversed()
 

@@ -25,6 +25,7 @@ class LineageViewModel(private val repository: LineageRepository) : ViewModel() 
     fun culturesForLineage(id: Long) = repository.observeCultures(id)
     fun cultivationsForLineage(id: Long) = repository.observeLineageCultivations(id)
     fun culture(id: Long) = repository.observeCulture(id)
+    fun cultureEvents(id: Long) = repository.observeCultureEvents(id)
     fun culturePhotos(id: Long) = repository.observeCulturePhotos(id)
     fun clearError() { _error.value = null }
     fun reportError(message: String) { _error.value = message }

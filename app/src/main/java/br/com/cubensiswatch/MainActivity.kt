@@ -163,6 +163,7 @@ private fun CubensisWatch(viewModel: DashboardViewModel, cultivationViewModel: C
                     onOpenReminders = { navController.navigate("configuracoes") },
                     onOpenCultivations = { navController.navigate("cultivos") },
                     onOpenMaterials = { navController.navigate("materiais") },
+                    onOpenIncubators = { navController.navigate("incubadora") },
                 )
             }
             composable("cultivos") {
@@ -250,6 +251,7 @@ private fun CubensisWatch(viewModel: DashboardViewModel, cultivationViewModel: C
                     id, lineageViewModel,
                     onEdit = { navController.navigate("culture/$id/edit") },
                     onDeleted = { navController.popBackStack() },
+                    onCulture = { relatedId -> navController.navigate("culture/$relatedId") },
                     onNewCultivation = { lineageId, cultureId -> navController.navigate("cultivations/new?lineageId=$lineageId&sourceCultureId=$cultureId") },
                 )
             }
@@ -311,6 +313,7 @@ private fun DashboardScreen(
     onOpenReminders: () -> Unit,
     onOpenCultivations: () -> Unit,
     onOpenMaterials: () -> Unit,
+    onOpenIncubators: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -323,23 +326,27 @@ private fun DashboardScreen(
                 Column {
                     Text("Cubensis Watch", style = MaterialTheme.typography.headlineMedium)
                     Spacer(Modifier.height(4.dp))
-                    Text("Seu diário de cultivo, sempre à mão.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Acompanhe o que precisa de atenção hoje.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
-        item { Text("Visão geral", style = MaterialTheme.typography.titleLarge) }
+        item { Text("Resumo", style = MaterialTheme.typography.titleLarge) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 MetricCard("Cultivos ativos", active.toString(), Modifier.weight(1f))
                 MetricCard("Em incubação", incubating.toString(), Modifier.weight(1f))
             }
         }
-        item { MetricCard("Culturas ativas", activeCultures.toString(), Modifier.fillMaxWidth()) }
-        item { MetricCard("Materiais abaixo do mínimo", lowStock.toString(), Modifier.fillMaxWidth().clickable(onClick = onOpenMaterials)) }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                MetricCard("Culturas ativas", activeCultures.toString(), Modifier.weight(1f))
+                MetricCard("Estoque baixo", lowStock.toString(), Modifier.weight(1f).clickable(onClick = onOpenMaterials))
+            }
+        }
         item { MetricCard("Cultivos contaminados", problems.toString(), Modifier.fillMaxWidth().clickable(onClick = onOpenCultivations)) }
         val contaminatedCultivations = cultivations.filter { it.status == "Contaminado" }.take(3)
         if (contaminatedCultivations.isNotEmpty()) {
-            item { Text("Acompanhar cultivos contaminados", style = MaterialTheme.typography.titleLarge) }
+            item { DashboardSectionHeader("Cultivos para revisar", "Ver todos", onOpenCultivations) }
             items(contaminatedCultivations, key = { "dashboard-contaminated-${it.id}" }) { cultivation ->
                 Card(Modifier.fillMaxWidth().clickable { onOpenCultivation(cultivation.id) }) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -351,7 +358,7 @@ private fun DashboardScreen(
         }
         val lowStockMaterials = materials.filter { it.quantity < it.minimum }.sortedBy { it.quantity - it.minimum }.take(3)
         if (lowStockMaterials.isNotEmpty()) {
-            item { Text("Precisam de reposição", style = MaterialTheme.typography.titleLarge) }
+            item { DashboardSectionHeader("Precisam de reposição", "Ver estoque", onOpenMaterials) }
             items(lowStockMaterials, key = { "dashboard-low-stock-${it.id}" }) { material ->
                 Card(Modifier.fillMaxWidth().clickable(onClick = onOpenMaterials)) {
                     Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -364,19 +371,32 @@ private fun DashboardScreen(
                 }
             }
         }
-        item { Text("Próximos lembretes", style = MaterialTheme.typography.titleLarge) }
-        val nextReminders = reminders.filter { it.enabled }.sortedBy { it.dueAt }.take(3)
-        if (nextReminders.isEmpty()) item { Text("Nenhum lembrete ativo.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { DashboardSectionHeader("Lembretes", "Ver todos", onOpenReminders) }
+        val now = System.currentTimeMillis()
+        val nextReminders = reminders.filter { it.enabled }.sortedWith(compareBy<Reminder> { it.dueAt >= now }.thenBy { it.dueAt }).take(3)
+        if (nextReminders.isEmpty()) item {
+            DashboardInfoCard("Nenhum lembrete ativo", "Crie um lembrete para acompanhar tarefas e verificações.", actionLabel = "Abrir lembretes", onAction = onOpenReminders)
+        }
         else items(nextReminders, key = { "dashboard-reminder-${it.id}" }) { reminder ->
             Card(Modifier.fillMaxWidth().clickable(onClick = onOpenReminders)) {
-                Column(Modifier.padding(14.dp)) {
-                    Text(reminder.title, style = MaterialTheme.typography.titleMedium)
-                    Text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(reminder.dueAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(Modifier.weight(1f)) {
+                        Text(reminder.title, style = MaterialTheme.typography.titleMedium)
+                        Text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(reminder.dueAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (reminder.dueAt < now) Text("Atrasado", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
-        item { Text("Atividade recente", style = MaterialTheme.typography.titleLarge) }
-        if (recentEvents.isEmpty()) item { Text("Ainda não há atividade registrada.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { DashboardSectionHeader("Atividade recente", "Ver cultivos", onOpenCultivations) }
+        if (recentEvents.isEmpty()) item {
+            DashboardInfoCard(
+                if (cultivations.isEmpty()) "Comece seu diário" else "Nenhuma atividade recente",
+                if (cultivations.isEmpty()) "Cadastre um cultivo para acompanhar etapas, observações e colheitas." else "As atualizações dos seus cultivos aparecerão aqui.",
+                actionLabel = if (cultivations.isEmpty()) "Criar cultivo" else "Ver cultivos",
+                onAction = if (cultivations.isEmpty()) onCreateCultivation else onOpenCultivations,
+            )
+        }
         else items(recentEvents, key = { "dashboard-event-${it.id}" }) { event ->
             val cultivation = cultivations.firstOrNull { it.id == event.cultivationId }
             Card(Modifier.fillMaxWidth().clickable { onOpenCultivation(event.cultivationId) }) {
@@ -387,21 +407,20 @@ private fun DashboardScreen(
                 }
             }
         }
-        item { Text("Acesso rápido", style = MaterialTheme.typography.titleLarge) }
+        item { Text("Acessos rápidos", style = MaterialTheme.typography.titleLarge) }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onCreateCultivation, modifier = Modifier.fillMaxWidth()) { Text("＋  Novo cultivo") }
-                OutlinedButton(onClick = onCreateCulture, modifier = Modifier.fillMaxWidth()) { Text("＋  Nova cultura") }
-                OutlinedButton(onClick = onCreateNote, modifier = Modifier.fillMaxWidth()) { Text("＋  Nova observação") }
-                OutlinedButton(onClick = onSearch, modifier = Modifier.fillMaxWidth()) { Text("⌕  Buscar registros") }
-                OutlinedButton(onClick = onCreateMaterial, modifier = Modifier.fillMaxWidth()) { Text("＋  Adicionar material") }
-            }
-        }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp)) {
-                    Text("Tudo pronto para começar", style = MaterialTheme.typography.titleMedium)
-                    Text("Registre um cultivo para acompanhar etapas, observações e colheitas.", modifier = Modifier.padding(top = 6.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    QuickActionButton("＋", "Novo cultivo", Modifier.weight(1f), onCreateCultivation)
+                    QuickActionButton("＋", "Nova cultura", Modifier.weight(1f), onCreateCulture)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    QuickActionButton("▤", "Materiais", Modifier.weight(1f), onCreateMaterial)
+                    QuickActionButton("◷", "Incubadoras", Modifier.weight(1f), onOpenIncubators)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    QuickActionButton("✎", "Anotações", Modifier.weight(1f), onCreateNote)
+                    QuickActionButton("⌕", "Buscar", Modifier.weight(1f), onSearch)
                 }
             }
         }
@@ -409,6 +428,39 @@ private fun DashboardScreen(
 }
 
 private fun Double.prettyDashboard(): String = if (this % 1.0 == 0.0) toLong().toString() else toString()
+
+@Composable
+private fun DashboardSectionHeader(title: String, action: String, onAction: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text(title, style = MaterialTheme.typography.titleLarge)
+        TextButton(onClick = onAction) { Text(action) }
+    }
+}
+
+@Composable
+private fun DashboardInfoCard(title: String, description: String, actionLabel: String, onAction: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = onAction) { Text(actionLabel) }
+        }
+    }
+}
+
+@Composable
+private fun QuickActionButton(symbol: String, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    FilledTonalButton(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = 76.dp),
+        contentPadding = PaddingValues(10.dp),
+    ) {
+        Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(symbol, style = MaterialTheme.typography.titleLarge)
+            Text(label, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
 
 @Composable
 private fun MetricCard(title: String, value: String, modifier: Modifier = Modifier) {

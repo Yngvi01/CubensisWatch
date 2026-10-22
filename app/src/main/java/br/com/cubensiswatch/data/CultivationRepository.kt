@@ -21,6 +21,24 @@ class CultivationRepository(
     fun observePhotos(id: Long): Flow<List<Photo>> = database.photoDao().observeForCultivation(id)
     fun observeHarvests(id: Long): Flow<List<Harvest>> = database.harvestDao().observeForCultivation(id)
     fun observeHarvestPhotos(harvestId: Long): Flow<List<HarvestPhoto>> = database.harvestPhotoDao().observeForHarvest(harvestId)
+    fun observeExperiment(id: Long): Flow<CultivationExperiment?> = database.cultivationExperimentDao().observeForCultivation(id)
+    fun observeSimilarExperiments(id: Long): Flow<List<CultivationExperiment>> = database.cultivationExperimentDao().observeSimilar(id)
+
+    suspend fun saveExperiment(experiment: CultivationExperiment) {
+        database.withTransaction {
+            checkNotNull(dao.getById(experiment.cultivationId)) { "Cultivo não encontrado." }
+            database.cultivationExperimentDao().save(experiment.copy(
+                plannedConditions = experiment.plannedConditions.trim(),
+                observedConditions = experiment.observedConditions.trim(),
+                materialsAndAmounts = experiment.materialsAndAmounts.trim(),
+                plannedStageDurations = experiment.plannedStageDurations.trim(),
+                actualStageDurations = experiment.actualStageDurations.trim(),
+                result = experiment.result.trim(),
+                notes = experiment.notes.trim(),
+                updatedAt = System.currentTimeMillis(),
+            ))
+        }
+    }
 
     suspend fun addHarvestPhotos(harvestId: Long, uris: List<Uri>, caption: String = "") {
         require(uris.isNotEmpty()) { "Selecione ao menos uma foto." }
@@ -119,16 +137,43 @@ class CultivationRepository(
         }
     }
 
-    suspend fun addObservation(cultivationId: Long, text: String, temperature: Double?, humidity: Double?) {
-        database.eventDao().insert(
-            CultivationEvent(
-                cultivationId = cultivationId,
-                type = "Observação",
-                description = text,
-                temperature = temperature,
-                humidity = humidity,
-            ),
-        )
+    suspend fun addObservation(
+        cultivationId: Long,
+        type: String,
+        text: String,
+        temperature: Double?,
+        humidity: Double?,
+        photoUri: Uri?,
+    ) {
+        require(type == "Observação" || type == "Problema") { "Tipo de registro inválido." }
+        require(text.isNotBlank() || temperature != null || humidity != null || photoUri != null) { "Adicione um texto, uma leitura ou uma foto." }
+        val photoFile = photoUri?.let { photoStore.import(it) }
+        try {
+            database.withTransaction {
+                val cultivation = checkNotNull(dao.getById(cultivationId)) { "Cultivo não encontrado." }
+                val recordedAt = System.currentTimeMillis()
+                val description = text.trim().ifBlank {
+                    if (type == "Problema") "Problema registrado" else "Registro rápido"
+                }
+                val eventId = database.eventDao().insert(
+                    CultivationEvent(
+                        cultivationId = cultivationId,
+                        type = type,
+                        description = description,
+                        occurredAt = recordedAt,
+                        temperature = temperature,
+                        humidity = humidity,
+                        stage = cultivation.status,
+                    ),
+                )
+                photoFile?.let { file ->
+                    database.photoDao().insert(Photo(cultivationId = cultivationId, eventId = eventId, localPath = file.absolutePath, caption = text.trim(), capturedAt = recordedAt))
+                }
+            }
+        } catch (error: Throwable) {
+            photoFile?.let { photoStore.delete(it.absolutePath) }
+            throw error
+        }
     }
 
     suspend fun changeStatus(cultivationId: Long, status: String) {
@@ -143,11 +188,13 @@ class CultivationRepository(
         val files = mutableListOf<File>()
         try {
             uris.forEach { uri -> files += photoStore.import(uri) }
-            val eventId = database.eventDao().insert(
-                CultivationEvent(cultivationId = cultivationId, type = "Foto", description = if (caption.isBlank()) "${files.size} foto(s) adicionada(s)" else caption),
-            )
             database.withTransaction {
-                files.forEach { file -> database.photoDao().insert(Photo(cultivationId = cultivationId, eventId = eventId, localPath = file.absolutePath, caption = caption)) }
+                val cultivation = checkNotNull(dao.getById(cultivationId)) { "Cultivo não encontrado." }
+                val recordedAt = System.currentTimeMillis()
+                val eventId = database.eventDao().insert(
+                    CultivationEvent(cultivationId = cultivationId, type = "Foto", description = if (caption.isBlank()) "${files.size} foto(s) adicionada(s)" else caption, occurredAt = recordedAt, stage = cultivation.status),
+                )
+                files.forEach { file -> database.photoDao().insert(Photo(cultivationId = cultivationId, eventId = eventId, localPath = file.absolutePath, caption = caption, capturedAt = recordedAt)) }
             }
             return files
         } catch (error: Throwable) {
@@ -161,8 +208,10 @@ class CultivationRepository(
     suspend fun addCapturedPhoto(cultivationId: Long, file: File, caption: String = "") {
         try {
             database.withTransaction {
-                val eventId = database.eventDao().insert(CultivationEvent(cultivationId = cultivationId, type = "Foto", description = caption.ifBlank { "Foto tirada" }))
-                database.photoDao().insert(Photo(cultivationId = cultivationId, eventId = eventId, localPath = file.absolutePath, caption = caption))
+                val cultivation = checkNotNull(dao.getById(cultivationId)) { "Cultivo não encontrado." }
+                val recordedAt = System.currentTimeMillis()
+                val eventId = database.eventDao().insert(CultivationEvent(cultivationId = cultivationId, type = "Foto", description = caption.ifBlank { "Foto tirada" }, occurredAt = recordedAt, stage = cultivation.status))
+                database.photoDao().insert(Photo(cultivationId = cultivationId, eventId = eventId, localPath = file.absolutePath, caption = caption, capturedAt = recordedAt))
             }
         } catch (error: Throwable) {
             photoStore.delete(file.absolutePath)

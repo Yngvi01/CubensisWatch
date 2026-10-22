@@ -11,6 +11,7 @@ class MaterialRepository(private val database: AppDatabase, private val photoSto
     val lowStockCount = dao.observeLowCount()
     val shopping: Flow<List<ShoppingItem>> = dao.observeShopping()
     val cultivations: Flow<List<Cultivation>> = database.cultivationDao().observeAll()
+    val materialPhotos: Flow<List<MaterialPhoto>> = database.materialPhotoDao().observeAll()
     fun material(id: Long) = dao.observeById(id)
     fun movements(id: Long) = dao.observeMovements(id)
     fun photos(id: Long): Flow<List<MaterialPhoto>> = database.materialPhotoDao().observeForMaterial(id)

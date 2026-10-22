@@ -21,6 +21,9 @@ interface CultureDao {
     @Query("SELECT * FROM cultures WHERE id = :id")
     suspend fun getById(id: Long): Culture?
 
+    @Query("SELECT EXISTS(SELECT 1 FROM cultures WHERE code = :code COLLATE NOCASE AND id != :excludingId)")
+    suspend fun codeExists(code: String, excludingId: Long): Boolean
+
     @Query("SELECT * FROM cultures WHERE parentCultureId = :id")
     suspend fun getChildren(id: Long): List<Culture>
 

@@ -7,8 +7,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +23,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -33,12 +37,15 @@ import br.com.cubensiswatch.data.Photo
 import br.com.cubensiswatch.data.Incubator
 import br.com.cubensiswatch.data.Harvest
 import br.com.cubensiswatch.data.HarvestPhoto
+import br.com.cubensiswatch.data.CultivationExperiment
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 
 val cultivationStatuses = listOf("Planejado", "Preparação", "Incubação", "Colonização", "Frutificação", "Colheita", "Finalizado", "Contaminado", "Descartado")
 private val dateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy · HH:mm").withZone(ZoneId.systemDefault())
@@ -188,8 +195,14 @@ fun CultivationDetailScreen(
     val events by viewModel.events(id).collectAsStateWithLifecycle(initialValue = emptyList())
     val photos by viewModel.photos(id).collectAsStateWithLifecycle(initialValue = emptyList())
     val harvests by viewModel.harvests(id).collectAsStateWithLifecycle(initialValue = emptyList())
+    val experiment by viewModel.experiment(id).collectAsStateWithLifecycle(initialValue = null)
+    val similarExperiments by viewModel.similarExperiments(id).collectAsStateWithLifecycle(initialValue = emptyList())
+    val allCultivations by viewModel.cultivations.collectAsStateWithLifecycle(initialValue = emptyList())
     val error by viewModel.error.collectAsStateWithLifecycle()
     var observationOpen by remember { mutableStateOf(false) }
+    var observationType by remember { mutableStateOf("Observação") }
+    var experimentOpen by remember { mutableStateOf(false) }
+    var comparisonOpen by remember { mutableStateOf(false) }
     var harvestOpen by remember { mutableStateOf(false) }
     var harvestToDelete by remember { mutableStateOf<Harvest?>(null) }
     var deleteConfirmOpen by remember { mutableStateOf(false) }
@@ -280,10 +293,40 @@ fun CultivationDetailScreen(
             }
         }
         item {
-            Row(Modifier.fillMaxWidth()) {
-                Button(onClick = { observationOpen = true }, modifier = Modifier.weight(1f)) { Text("＋ Observação") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { photoSourceOpen = true }, modifier = Modifier.weight(1f)) { Text("＋ Adicionar fotos") }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { observationType = "Observação"; observationOpen = true }, modifier = Modifier.weight(1f)) { Text("＋ Observação") }
+                    OutlinedButton(onClick = { observationType = "Problema"; observationOpen = true }, modifier = Modifier.weight(1f)) { Text("⚠ Problema") }
+                }
+                OutlinedButton(onClick = { photoSourceOpen = true }, modifier = Modifier.fillMaxWidth()) { Text("＋ Adicionar fotos") }
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Ficha do experimento", style = MaterialTheme.typography.titleLarge)
+                            Text(if (experiment == null) "Plano, execução e resultado" else "Atualizada em ${dateTimeFormatter.format(Instant.ofEpochMilli(experiment!!.updatedAt))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        TextButton(onClick = { experimentOpen = true }) { Text(if (experiment == null) "Preencher" else "Editar") }
+                    }
+                    if (experiment == null) Text("Registre o que planejou e compare com o que aconteceu.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else {
+                        ExperimentSummary(experiment!!)
+                        if (similarExperiments.isNotEmpty()) {
+                            HorizontalDivider()
+                            Text("Execuções semelhantes", style = MaterialTheme.typography.titleSmall)
+                            similarExperiments.forEach { previous ->
+                                val previousRun = allCultivations.firstOrNull { it.id == previous.cultivationId }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(previousRun?.let { "${it.name} · ${it.status}" } ?: "Outro cultivo", style = MaterialTheme.typography.labelLarge)
+                                    Text(listOfNotNull(previous.result.takeIf(String::isNotBlank), previous.observedConditions.takeIf(String::isNotBlank)).joinToString(" · ").ifBlank { "Ficha sem resultado preenchido" }, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         item {
@@ -316,7 +359,12 @@ fun CultivationDetailScreen(
             }
         }
         if (photos.isNotEmpty()) {
-            item { Text("Fotos", style = MaterialTheme.typography.titleLarge) }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("Fotos · linha do tempo", style = MaterialTheme.typography.titleLarge)
+                    if (photos.size >= 2) TextButton(onClick = { comparisonOpen = true }) { Text("Comparar") }
+                }
+            }
             items(photos, key = { "photo-${it.id}" }) { photo ->
                 PhotoCard(photo = photo, onDelete = { pendingDeletePhoto = photo })
             }
@@ -332,8 +380,24 @@ fun CultivationDetailScreen(
     }
 
     if (observationOpen) ObservationDialog(
+        type = observationType,
+        stage = item.status,
+        error = error,
+        onClearError = viewModel::clearError,
         onDismiss = { observationOpen = false },
-        onSave = { text, temperature, humidity -> viewModel.addObservation(id, text, temperature, humidity); observationOpen = false },
+        onSave = { type, text, temperature, humidity, photoUri ->
+            viewModel.addObservation(id, type, text, temperature, humidity, photoUri) { observationOpen = false }
+        },
+    )
+    if (experimentOpen) ExperimentDialog(
+        initial = experiment,
+        cultivationId = id,
+        onDismiss = { experimentOpen = false },
+        onSave = { value -> viewModel.saveExperiment(value) { experimentOpen = false } },
+    )
+    if (comparisonOpen && photos.size >= 2) PhotoComparisonDialog(
+        photos = photos.map { ComparisonImage(it.id, it.localPath, it.caption, it.capturedAt) },
+        onDismiss = { comparisonOpen = false },
     )
     if (harvestOpen) HarvestDialog(
         onDismiss = { harvestOpen = false },
@@ -527,6 +591,7 @@ private fun TimelineEventCard(event: CultivationEvent) {
                 Text(dateTimeFormatter.format(Instant.ofEpochMilli(event.occurredAt)), style = MaterialTheme.typography.bodySmall)
             }
             Text(event.description)
+            event.stage?.takeIf { it.isNotBlank() }?.let { Text("Etapa: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             val environment = listOfNotNull(event.temperature?.let { "${it} °C" }, event.humidity?.let { "${it}% UR" }).joinToString(" · ")
             if (environment.isNotBlank()) Text(environment, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -540,14 +605,23 @@ private fun PhotoCard(photo: Photo, onDelete: () -> Unit) =
 @Composable
 fun LocalPhotoCard(localPath: String, caption: String, capturedAt: Long, onDelete: () -> Unit) {
     var fullScreen by remember(localPath) { mutableStateOf(false) }
+    var photoUnavailable by remember(localPath) { mutableStateOf(false) }
+    var zoom by remember(localPath) { mutableFloatStateOf(1f) }
+    var panX by remember(localPath) { mutableFloatStateOf(0f) }
+    var panY by remember(localPath) { mutableFloatStateOf(0f) }
     val bitmap by produceState<ImageBitmap?>(null, localPath) {
+        photoUnavailable = false
         value = withContext(Dispatchers.IO) {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFile(localPath, bounds)
-            var sample = 1
-            while (bounds.outWidth / sample > 1200 || bounds.outHeight / sample > 1200) sample *= 2
-            BitmapFactory.decodeFile(localPath, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null
+            else {
+                var sample = 1
+                while (bounds.outWidth / sample > 1200 || bounds.outHeight / sample > 1200) sample *= 2
+                BitmapFactory.decodeFile(localPath, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+            }
         }
+        photoUnavailable = value == null
     }
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
         Column {
@@ -555,9 +629,27 @@ fun LocalPhotoCard(localPath: String, caption: String, capturedAt: Long, onDelet
                 Image(
                     it,
                     contentDescription = "Ampliar ${caption.ifBlank { "foto do registro" }}",
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).clickable { fullScreen = true },
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).clickable {
+                        zoom = 1f
+                        panX = 0f
+                        panY = 0f
+                        fullScreen = true
+                    },
                     contentScale = ContentScale.Crop,
                 )
+            }
+            if (bitmap == null && photoUnavailable) {
+                Box(
+                    Modifier.fillMaxWidth().height(140.dp).background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = androidx.compose.ui.Alignment.Center,
+                ) {
+                    Text("Foto indisponível", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else if (bitmap == null) {
+                Box(
+                    Modifier.fillMaxWidth().height(140.dp).background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = androidx.compose.ui.Alignment.Center,
+                ) { CircularProgressIndicator() }
             }
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) {
@@ -585,9 +677,43 @@ fun LocalPhotoCard(localPath: String, caption: String, capturedAt: Long, onDelet
                 Image(
                     bitmap = bitmap!!,
                     contentDescription = caption.ifBlank { "Foto ampliada" },
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .pointerInput(localPath) {
+                            detectTransformGestures { _, pan, gestureZoom, _ ->
+                                val updatedZoom = (zoom * gestureZoom).coerceIn(1f, 5f)
+                                val zoomFactor = updatedZoom / zoom
+                                zoom = updatedZoom
+                                if (updatedZoom == 1f) {
+                                    panX = 0f
+                                    panY = 0f
+                                } else {
+                                    val maxX = size.width * (updatedZoom - 1f) / 2f
+                                    val maxY = size.height * (updatedZoom - 1f) / 2f
+                                    panX = (panX * zoomFactor + pan.x).coerceIn(-maxX, maxX)
+                                    panY = (panY * zoomFactor + pan.y).coerceIn(-maxY, maxY)
+                                }
+                            }
+                        }
+                        .pointerInput(localPath) {
+                            detectTapGestures(onDoubleTap = {
+                                if (zoom > 1f) {
+                                    zoom = 1f
+                                    panX = 0f
+                                    panY = 0f
+                                } else zoom = 2.5f
+                            })
+                        }
+                        .graphicsLayer {
+                            scaleX = zoom
+                            scaleY = zoom
+                            translationX = panX
+                            translationY = panY
+                        },
                     contentScale = ContentScale.Fit,
                 )
+                Text("Pinçe para ampliar · arraste para mover · toque duas vezes para redefinir", color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
                 Text(dateTimeFormatter.format(Instant.ofEpochMilli(capturedAt)), color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             }
         }
@@ -623,23 +749,163 @@ private fun PhotoDescriptionDialog(
 }
 
 @Composable
-private fun ObservationDialog(onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
+private fun ObservationDialog(
+    type: String,
+    stage: String,
+    error: String?,
+    onClearError: () -> Unit,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, String, Uri?) -> Unit,
+) {
     var text by remember { mutableStateOf("") }
     var temperature by remember { mutableStateOf("") }
     var humidity by remember { mutableStateOf("") }
+    var photoUri by remember { mutableStateOf<Uri?>(null) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { photoUri = it }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Nova observação") },
+        title = { Text(if (type == "Problema") "Registrar problema" else "Registro rápido") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text("Observação *") }, minLines = 3)
-                OutlinedTextField(value = temperature, onValueChange = { temperature = it }, label = { Text("Temperatura °C (opcional)") }, singleLine = true)
-                OutlinedTextField(value = humidity, onValueChange = { humidity = it }, label = { Text("Umidade % (opcional)") }, singleLine = true)
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${dateTimeFormatter.format(Instant.now())} · Etapa: $stage", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text("Descrição (opcional)") }, minLines = 2)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = temperature, onValueChange = { temperature = it }, label = { Text("Temp. °C") }, singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = humidity, onValueChange = { humidity = it }, label = { Text("Umidade %") }, singleLine = true, modifier = Modifier.weight(1f))
+                }
+                OutlinedButton(onClick = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (photoUri == null) "＋ Anexar foto" else "Foto anexada · trocar")
+                }
+                if (photoUri != null) TextButton(onClick = { photoUri = null }) { Text("Remover foto") }
+                if (!error.isNullOrBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(text, temperature, humidity) }, enabled = text.isNotBlank()) { Text("Salvar") } },
+        confirmButton = { TextButton(onClick = { onClearError(); onSave(type, text, temperature, humidity, photoUri) }) { Text("Salvar") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
+}
+
+@Composable
+private fun ExperimentSummary(value: CultivationExperiment) {
+    val rows = listOf(
+        "Condições planejadas" to value.plannedConditions,
+        "Condições observadas" to value.observedConditions,
+        "Materiais e quantidades" to value.materialsAndAmounts,
+        "Duração planejada" to value.plannedStageDurations,
+        "Duração real" to value.actualStageDurations,
+        "Resultado" to value.result,
+        "Observações" to value.notes,
+    ).filter { it.second.isNotBlank() }
+    rows.forEach { (label, content) ->
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(content, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun ExperimentDialog(
+    initial: CultivationExperiment?,
+    cultivationId: Long,
+    onDismiss: () -> Unit,
+    onSave: (CultivationExperiment) -> Unit,
+) {
+    var planned by remember(initial?.id) { mutableStateOf(initial?.plannedConditions.orEmpty()) }
+    var observed by remember(initial?.id) { mutableStateOf(initial?.observedConditions.orEmpty()) }
+    var materials by remember(initial?.id) { mutableStateOf(initial?.materialsAndAmounts.orEmpty()) }
+    var plannedDuration by remember(initial?.id) { mutableStateOf(initial?.plannedStageDurations.orEmpty()) }
+    var actualDuration by remember(initial?.id) { mutableStateOf(initial?.actualStageDurations.orEmpty()) }
+    var result by remember(initial?.id) { mutableStateOf(initial?.result.orEmpty()) }
+    var notes by remember(initial?.id) { mutableStateOf(initial?.notes.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ficha do experimento") },
+        text = {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Separe o plano do que foi realmente observado. Use texto livre; nenhum campo é obrigatório.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(planned, { planned = it }, label = { Text("Condições planejadas") }, minLines = 2)
+                OutlinedTextField(observed, { observed = it }, label = { Text("Condições observadas") }, minLines = 2)
+                OutlinedTextField(materials, { materials = it }, label = { Text("Materiais e quantidades usados") }, minLines = 2)
+                OutlinedTextField(plannedDuration, { plannedDuration = it }, label = { Text("Duração planejada por etapa") }, minLines = 2)
+                OutlinedTextField(actualDuration, { actualDuration = it }, label = { Text("Duração real por etapa") }, minLines = 2)
+                OutlinedTextField(result, { result = it }, label = { Text("Resultado final") }, minLines = 2)
+                OutlinedTextField(notes, { notes = it }, label = { Text("Observações adicionais") }, minLines = 2)
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(CultivationExperiment(id = initial?.id ?: 0, cultivationId = cultivationId, plannedConditions = planned, observedConditions = observed, materialsAndAmounts = materials, plannedStageDurations = plannedDuration, actualStageDurations = actualDuration, result = result, notes = notes)) }) { Text("Salvar ficha") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+data class ComparisonImage(val id: Long, val localPath: String, val caption: String, val capturedAt: Long)
+
+@Composable
+fun PhotoComparisonDialog(photos: List<ComparisonImage>, onDismiss: () -> Unit) {
+    if (photos.size < 2) return
+    var firstId by remember(photos) { mutableLongStateOf(photos.last().id) }
+    var secondId by remember(photos) { mutableLongStateOf(photos.first().id) }
+    val first = photos.firstOrNull { it.id == firstId } ?: photos.last()
+    val second = photos.firstOrNull { it.id == secondId } ?: photos.first()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Comparar fotos") },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ComparisonImageSelector("Foto A", photos, first.id, second.id, Modifier.weight(1f)) { selected ->
+                        firstId = selected
+                        if (selected == secondId) secondId = first.id
+                    }
+                    ComparisonImageSelector("Foto B", photos, second.id, first.id, Modifier.weight(1f)) { selected ->
+                        secondId = selected
+                        if (selected == firstId) firstId = second.id
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ComparisonPhotoPane(first, Modifier.weight(1f))
+                    ComparisonPhotoPane(second, Modifier.weight(1f))
+                }
+                Text("Linha do tempo: ${photos.size} fotos · mais antiga ${dateTimeFormatter.format(Instant.ofEpochMilli(photos.minOf { it.capturedAt }))} · mais recente ${dateTimeFormatter.format(Instant.ofEpochMilli(photos.maxOf { it.capturedAt }))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+    )
+}
+
+@Composable
+private fun ComparisonImageSelector(label: String, photos: List<ComparisonImage>, selectedId: Long, otherId: Long, modifier: Modifier, onSelect: (Long) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = photos.firstOrNull { it.id == selectedId }
+    Box(modifier) {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("$label\n${selected?.let { dateFormatter.format(Instant.ofEpochMilli(it.capturedAt)) } ?: "Selecionar"}") }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            photos.filter { it.id != otherId }.sortedByDescending { it.capturedAt }.forEach { photo ->
+                DropdownMenuItem(text = { Text("${dateTimeFormatter.format(Instant.ofEpochMilli(photo.capturedAt))} · ${photo.caption.ifBlank { "Foto" }}") }, onClick = { onSelect(photo.id); expanded = false })
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComparisonPhotoPane(photo: ComparisonImage, modifier: Modifier) {
+    val bitmap by produceState<ImageBitmap?>(null, photo.localPath) {
+        value = withContext(Dispatchers.IO) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(photo.localPath, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null else {
+                var sample = 1
+                while (bounds.outWidth / sample > 900 || bounds.outHeight / sample > 900) sample *= 2
+                BitmapFactory.decodeFile(photo.localPath, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+            }
+        }
+    }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (bitmap != null) Image(bitmap!!, contentDescription = photo.caption.ifBlank { "Foto comparativa" }, modifier = Modifier.fillMaxWidth().height(190.dp), contentScale = ContentScale.Fit)
+        else Box(Modifier.fillMaxWidth().height(190.dp).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = androidx.compose.ui.Alignment.Center) { Text("Foto indisponível") }
+        Text(dateTimeFormatter.format(Instant.ofEpochMilli(photo.capturedAt)), style = MaterialTheme.typography.labelSmall)
+        if (photo.caption.isNotBlank()) Text(photo.caption, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+    }
 }
 
 @Composable

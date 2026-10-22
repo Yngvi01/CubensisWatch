@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Cultivation::class, Culture::class, Lineage::class, CulturePhoto::class, CultivationEvent::class, Photo::class, Incubator::class, IncubatorReading::class, Material::class, StockMovement::class, ShoppingItem::class, Reminder::class, Harvest::class, HarvestPhoto::class, Note::class, NotePhoto::class, MaterialPhoto::class], version = 11, exportSchema = true)
+@Database(entities = [Cultivation::class, Culture::class, Lineage::class, CulturePhoto::class, CultivationEvent::class, Photo::class, Incubator::class, IncubatorReading::class, Material::class, StockMovement::class, ShoppingItem::class, Reminder::class, Harvest::class, HarvestPhoto::class, Note::class, NotePhoto::class, MaterialPhoto::class, CultivationExperiment::class, CultureEvent::class], version = 13, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun cultivationDao(): CultivationDao
     abstract fun eventDao(): CultivationEventDao
@@ -23,6 +23,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun noteDao(): NoteDao
     abstract fun notePhotoDao(): NotePhotoDao
     abstract fun materialPhotoDao(): MaterialPhotoDao
+    abstract fun cultivationExperimentDao(): CultivationExperimentDao
+    abstract fun cultureEventDao(): CultureEventDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -135,6 +137,26 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_material_photos_materialId ON material_photos(materialId)")
             }
         }
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS cultivation_experiments (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, cultivationId INTEGER NOT NULL, plannedConditions TEXT NOT NULL, observedConditions TEXT NOT NULL, materialsAndAmounts TEXT NOT NULL, plannedStageDurations TEXT NOT NULL, actualStageDurations TEXT NOT NULL, result TEXT NOT NULL, notes TEXT NOT NULL, updatedAt INTEGER NOT NULL, FOREIGN KEY(cultivationId) REFERENCES cultivations(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_cultivation_experiments_cultivationId ON cultivation_experiments(cultivationId)")
+            }
+        }
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("UPDATE lineages SET code = upper(trim(code))")
+                db.execSQL("UPDATE lineages SET code = 'LEGACY-LIN-' || id || '-' || lower(hex(randomblob(4))) WHERE trim(code) = '' OR id NOT IN (SELECT MIN(id) FROM lineages GROUP BY code)")
+                db.execSQL("UPDATE cultures SET code = upper(trim(code))")
+                db.execSQL("UPDATE cultures SET code = 'LEGACY-CU-' || id || '-' || lower(hex(randomblob(4))) WHERE trim(code) = '' OR id NOT IN (SELECT MIN(id) FROM cultures GROUP BY code)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_lineages_code ON lineages(code)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_cultures_code ON cultures(code)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS culture_events (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, cultureId INTEGER NOT NULL, type TEXT NOT NULL, description TEXT NOT NULL, occurredAt INTEGER NOT NULL, status TEXT, sourceCultureCode TEXT, FOREIGN KEY(cultureId) REFERENCES cultures(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_culture_events_cultureId ON culture_events(cultureId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_culture_events_occurredAt ON culture_events(occurredAt)")
+                db.execSQL("INSERT INTO culture_events (cultureId, type, description, occurredAt, status, sourceCultureCode) SELECT c.id, CASE WHEN c.createdAt > 0 THEN CASE WHEN c.parentCultureId IS NULL THEN 'Registro inicial' ELSE 'Transferência' END ELSE 'Histórico inicial' END, CASE WHEN c.createdAt <= 0 THEN 'Histórico iniciado na atualização; data original de criação não registrada' WHEN c.parentCultureId IS NULL THEN 'Amostra registrada' ELSE 'Amostra derivada de ' || COALESCE(p.code, 'origem não identificada') END, CASE WHEN c.createdAt > 0 THEN c.createdAt ELSE CAST(strftime('%s','now') AS INTEGER) * 1000 END, c.status, p.code FROM cultures c LEFT JOIN cultures p ON p.id = c.parentCultureId")
+            }
+        }
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
     }
 }

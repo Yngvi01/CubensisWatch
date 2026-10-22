@@ -13,7 +13,7 @@ import androidx.room.PrimaryKey
         ForeignKey(entity = Culture::class, parentColumns = ["id"], childColumns = ["parentCultureId"], onDelete = ForeignKey.SET_NULL),
         ForeignKey(entity = Incubator::class, parentColumns = ["id"], childColumns = ["incubatorId"], onDelete = ForeignKey.SET_NULL),
     ],
-    indices = [Index("lineageId"), Index("parentCultureId"), Index("incubatorId")],
+    indices = [Index("lineageId"), Index("parentCultureId"), Index("incubatorId"), Index(value = ["code"], unique = true)],
 )
 data class Culture(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

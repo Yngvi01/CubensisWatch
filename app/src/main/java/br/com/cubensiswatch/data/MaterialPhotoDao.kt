@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MaterialPhotoDao {
+    @Query("SELECT * FROM material_photos ORDER BY capturedAt DESC")
+    fun observeAll(): Flow<List<MaterialPhoto>>
+
     @Query("SELECT * FROM material_photos WHERE materialId = :materialId ORDER BY capturedAt DESC")
     fun observeForMaterial(materialId: Long): Flow<List<MaterialPhoto>>
 

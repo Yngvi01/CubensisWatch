@@ -1,23 +1,33 @@
 package br.com.cubensiswatch.ui
 
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.com.cubensiswatch.data.Material
 import br.com.cubensiswatch.data.ShoppingItem
 import br.com.cubensiswatch.data.StockMovement
 import br.com.cubensiswatch.data.Cultivation
 import br.com.cubensiswatch.data.MaterialPhoto
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val materialCategories = listOf("Substrato", "Higiene", "Consumível", "Equipamento", "Recipiente", "Ferramenta", "Outro")
 
@@ -33,6 +43,8 @@ fun MaterialScreen(vm: MaterialViewModel) {
     var photoPickerMaterialId by remember { mutableStateOf<Long?>(null) }
     var deletePhotoTarget by remember { mutableStateOf<MaterialPhoto?>(null) }
     val materials by vm.materials.collectAsStateWithLifecycle(initialValue = emptyList())
+    val allMaterialPhotos by vm.materialPhotos.collectAsStateWithLifecycle(initialValue = emptyList())
+    val photosByMaterialId = remember(allMaterialPhotos) { allMaterialPhotos.groupBy { it.materialId } }
     val shopping by vm.shopping.collectAsStateWithLifecycle(initialValue = emptyList())
     val cultivations by vm.cultivations.collectAsStateWithLifecycle(initialValue = emptyList())
     val error by vm.error.collectAsStateWithLifecycle()
@@ -60,11 +72,16 @@ fun MaterialScreen(vm: MaterialViewModel) {
             LazyColumn(contentPadding = PaddingValues(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (materials.isEmpty()) item { Text("Nenhum material cadastrado ainda.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(materials, key = { it.id }) { material ->
-                    Card(Modifier.fillMaxWidth().clickable { selected = material.id }) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(material.name, style = MaterialTheme.typography.titleLarge); if (material.quantity < material.minimum) Text("Baixo", color = MaterialTheme.colorScheme.error) }
-                        Text("${material.quantity.pretty()} ${material.unit} · mín. ${material.minimum.pretty()} · ideal ${material.ideal.pretty()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("${material.category}${material.location.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}", style = MaterialTheme.typography.bodySmall)
-                    } }
+                    Card(Modifier.fillMaxWidth().clickable { selected = material.id }) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            MaterialThumbnail(photosByMaterialId[material.id]?.firstOrNull()?.localPath)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(material.name, style = MaterialTheme.typography.titleLarge); if (material.quantity < material.minimum) Text("Baixo", color = MaterialTheme.colorScheme.error) }
+                                Text("${material.quantity.pretty()} ${material.unit} · mín. ${material.minimum.pretty()} · ideal ${material.ideal.pretty()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("${material.category}${material.location.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -92,6 +109,38 @@ fun MaterialScreen(vm: MaterialViewModel) {
     }
     if (moving != null) MovementDialog(moving!!.first, moving!!.second, materials, cultivations, vm, onDismiss = { moving = null }) { movement -> vm.move(movement) { moving = null } }
     if (addItem) SimpleTextDialog("Novo item de compra", "Nome do item", onDismiss = { addItem = false }) { vm.addShopping(it); addItem = false }
+}
+
+@Composable
+private fun MaterialThumbnail(localPath: String?) {
+    val bitmap by produceState<ImageBitmap?>(null, localPath) {
+        value = localPath?.let { path ->
+            withContext(Dispatchers.IO) {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(path, bounds)
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null
+                else {
+                    var sample = 1
+                    while (bounds.outWidth / sample > 256 || bounds.outHeight / sample > 256) sample *= 2
+                    BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+                }
+            }
+        }
+    }
+    Surface(
+        modifier = Modifier.size(64.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
+            if (bitmap != null) Image(
+                bitmap = bitmap!!,
+                contentDescription = "Foto do material",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            ) else Text("▧", fontSize = 26.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 @Composable

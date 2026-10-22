@@ -18,6 +18,7 @@ class MaterialViewModel(private val repository: MaterialRepository) : ViewModel(
     val lowCount = repository.lowStockCount
     val shopping = repository.shopping
     val cultivations = repository.cultivations
+    val materialPhotos = repository.materialPhotos
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
     fun clearError() { _error.value = null }

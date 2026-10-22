@@ -17,6 +17,9 @@ interface LineageDao {
     @Query("SELECT * FROM lineages WHERE id = :id")
     suspend fun getById(id: Long): Lineage?
 
+    @Query("SELECT EXISTS(SELECT 1 FROM lineages WHERE code = :code COLLATE NOCASE AND id != :excludingId)")
+    suspend fun codeExists(code: String, excludingId: Long): Boolean
+
     @Insert
     suspend fun insert(lineage: Lineage): Long
 

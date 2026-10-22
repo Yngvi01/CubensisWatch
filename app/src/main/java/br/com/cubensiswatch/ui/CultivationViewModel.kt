@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import br.com.cubensiswatch.data.Cultivation
 import br.com.cubensiswatch.data.CultivationRepository
+import br.com.cubensiswatch.data.CultivationExperiment
 import br.com.cubensiswatch.data.Harvest
 import br.com.cubensiswatch.data.HarvestPhoto
 import br.com.cubensiswatch.data.Photo
@@ -25,8 +26,17 @@ class CultivationViewModel(private val repository: CultivationRepository) : View
     fun photos(id: Long) = repository.observePhotos(id)
     fun harvests(id: Long) = repository.observeHarvests(id)
     fun harvestPhotos(id: Long) = repository.observeHarvestPhotos(id)
+    fun experiment(id: Long) = repository.observeExperiment(id)
+    fun similarExperiments(id: Long) = repository.observeSimilarExperiments(id)
     fun clearError() { _error.value = null }
     fun reportError(message: String) { _error.value = message }
+
+    fun saveExperiment(experiment: CultivationExperiment, onSaved: () -> Unit = {}) = viewModelScope.launch {
+        _error.value = null
+        runCatching { repository.saveExperiment(experiment) }
+            .onSuccess { onSaved() }
+            .onFailure { _error.value = it.message ?: "Não foi possível salvar a ficha do experimento." }
+    }
 
     fun save(cultivation: Cultivation, onSaved: (Long) -> Unit) = viewModelScope.launch {
         _error.value = null
@@ -47,12 +57,8 @@ class CultivationViewModel(private val repository: CultivationRepository) : View
             .onFailure { _error.value = it.message ?: "Não foi possível atualizar a etapa." }
     }
 
-    fun addObservation(id: Long, text: String, temperature: String, humidity: String) = viewModelScope.launch {
+    fun addObservation(id: Long, type: String, text: String, temperature: String, humidity: String, photoUri: Uri?, onSaved: () -> Unit = {}) = viewModelScope.launch {
         val normalizedText = text.trim()
-        if (normalizedText.isEmpty()) {
-            _error.value = "Escreva uma observação antes de salvar."
-            return@launch
-        }
         val parsedTemperature = temperature.trim().replace(',', '.').toDoubleOrNull()
         val parsedHumidity = humidity.trim().replace(',', '.').toDoubleOrNull()
         if (temperature.isNotBlank() && parsedTemperature == null || humidity.isNotBlank() && parsedHumidity == null) {
@@ -63,8 +69,17 @@ class CultivationViewModel(private val repository: CultivationRepository) : View
             _error.value = "A umidade deve estar entre 0% e 100%."
             return@launch
         }
+        if (parsedTemperature != null && !parsedTemperature.isFinite()) {
+            _error.value = "A temperatura precisa ser um número finito."
+            return@launch
+        }
+        if (normalizedText.isBlank() && parsedTemperature == null && parsedHumidity == null && photoUri == null) {
+            _error.value = "Adicione um texto, uma leitura ou uma foto."
+            return@launch
+        }
         _error.value = null
-        runCatching { repository.addObservation(id, normalizedText, parsedTemperature, parsedHumidity) }
+        runCatching { repository.addObservation(id, type, normalizedText, parsedTemperature, parsedHumidity, photoUri) }
+            .onSuccess { onSaved() }
             .onFailure { _error.value = it.message ?: "Não foi possível salvar a observação." }
     }
 
