@@ -139,4 +139,87 @@ class CultivationMigrationTest {
         }
         ApplicationProvider.getApplicationContext<Context>().deleteDatabase(name)
     }
+
+    @Test
+    fun migrationToHarvestsAddsEmptyTableAndKeepsCultivation() {
+        val name = "phase-six-migration.db"
+        helper.createDatabase(name, 6).apply {
+            execSQL("INSERT INTO cultivations (code, name, species, variety, lineage, status, startedAt, method, origin, incubator, notes) VALUES ('CT-006', 'Cultivo preservado', '', '', '', 'Frutificação', 1000, '', '', '', '')")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 7, true, *AppDatabase.MIGRATIONS).apply {
+            query("SELECT code, name FROM cultivations WHERE id = 1").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals("CT-006", cursor.getString(0))
+                assertEquals("Cultivo preservado", cursor.getString(1))
+            }
+            query("SELECT COUNT(*) FROM harvests").use { cursor -> check(cursor.moveToFirst()); assertEquals(0, cursor.getInt(0)) }
+            query("PRAGMA foreign_key_check").use { cursor -> check(!cursor.moveToFirst()) }
+            close()
+        }
+        ApplicationProvider.getApplicationContext<Context>().deleteDatabase(name)
+    }
+
+    @Test
+    fun migrationToHarvestPhotosAddsLocalPhotoTable() {
+        val name = "harvest-photos-migration-test.db"
+        helper.createDatabase(name, 7).apply {
+            execSQL("INSERT INTO cultivations (code, name, species, status, startedAt) VALUES ('CT-007', 'Cultivo', '', 'Colheita', 1000)")
+            execSQL("INSERT INTO harvests (cultivationId, number, harvestedAt, quantity, unit, notes) VALUES (1, 1, 2000, 120.0, 'g', '')")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 8, true, *AppDatabase.MIGRATIONS).apply {
+            query("SELECT COUNT(*) FROM harvest_photos").use { cursor -> check(cursor.moveToFirst()); assertEquals(0, cursor.getInt(0)) }
+            query("PRAGMA foreign_key_check").use { cursor -> check(!cursor.moveToFirst()) }
+            close()
+        }
+        ApplicationProvider.getApplicationContext<Context>().deleteDatabase(name)
+    }
+
+    @Test
+    fun migrationToNotesAddsSearchableNotesStorage() {
+        val name = "notes-migration-test.db"
+        helper.createDatabase(name, 8).apply { close() }
+        helper.runMigrationsAndValidate(name, 9, true, *AppDatabase.MIGRATIONS).apply {
+            query("SELECT COUNT(*) FROM notes").use { cursor -> check(cursor.moveToFirst()); assertEquals(0, cursor.getInt(0)) }
+            query("PRAGMA foreign_key_check").use { cursor -> check(!cursor.moveToFirst()) }
+            close()
+        }
+        ApplicationProvider.getApplicationContext<Context>().deleteDatabase(name)
+    }
+
+    @Test
+    fun migrationToNotePhotosAddsLinkedPhotoStorage() {
+        val name = "note-photos-migration-test.db"
+        helper.createDatabase(name, 9).apply {
+            execSQL("INSERT INTO notes (title, text, createdAt, updatedAt, tags) VALUES ('Nota', 'Conteúdo', 1000, 1000, '')")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 10, true, *AppDatabase.MIGRATIONS).apply {
+            query("SELECT COUNT(*) FROM note_photos").use { cursor -> check(cursor.moveToFirst()); assertEquals(0, cursor.getInt(0)) }
+            query("PRAGMA foreign_key_check").use { cursor -> check(!cursor.moveToFirst()) }
+            close()
+        }
+        ApplicationProvider.getApplicationContext<Context>().deleteDatabase(name)
+    }
+
+    @Test
+    fun migrationToMaterialPhotosAddsLinkedPhotoStorage() {
+        val name = "material-photos-migration-test.db"
+        helper.createDatabase(name, 10).apply {
+            execSQL("INSERT INTO materials (name, category, quantity, unit, minimum, ideal, location, notes) VALUES ('Álcool', 'Higiene', 2.0, 'L', 0.5, 3.0, '', '')")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 11, true, *AppDatabase.MIGRATIONS).apply {
+            query("SELECT COUNT(*) FROM material_photos").use { cursor -> check(cursor.moveToFirst()); assertEquals(0, cursor.getInt(0)) }
+            query("SELECT name, quantity FROM materials WHERE id = 1").use { cursor ->
+                check(cursor.moveToFirst())
+                assertEquals("Álcool", cursor.getString(0))
+                assertEquals(2.0, cursor.getDouble(1), 0.0)
+            }
+            query("PRAGMA foreign_key_check").use { cursor -> check(!cursor.moveToFirst()) }
+            close()
+        }
+        ApplicationProvider.getApplicationContext<Context>().deleteDatabase(name)
+    }
 }

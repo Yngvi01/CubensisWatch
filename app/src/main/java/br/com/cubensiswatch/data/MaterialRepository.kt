@@ -1,9 +1,11 @@
 package br.com.cubensiswatch.data
 
 import androidx.room.withTransaction
+import android.net.Uri
 import kotlinx.coroutines.flow.Flow
+import java.io.File
 
-class MaterialRepository(private val database: AppDatabase) {
+class MaterialRepository(private val database: AppDatabase, private val photoStore: LocalPhotoStore) {
     private val dao = database.materialDao()
     val materials: Flow<List<Material>> = dao.observeAll()
     val lowStockCount = dao.observeLowCount()
@@ -11,6 +13,27 @@ class MaterialRepository(private val database: AppDatabase) {
     val cultivations: Flow<List<Cultivation>> = database.cultivationDao().observeAll()
     fun material(id: Long) = dao.observeById(id)
     fun movements(id: Long) = dao.observeMovements(id)
+    fun photos(id: Long): Flow<List<MaterialPhoto>> = database.materialPhotoDao().observeForMaterial(id)
+
+    suspend fun addPhotos(materialId: Long, uris: List<Uri>) {
+        require(uris.isNotEmpty()) { "Selecione ao menos uma foto." }
+        val files = mutableListOf<File>()
+        try {
+            uris.forEach { files += photoStore.import(it) }
+            database.withTransaction {
+                checkNotNull(dao.getById(materialId)) { "O material não existe mais." }
+                files.forEach { file -> database.materialPhotoDao().insert(MaterialPhoto(materialId = materialId, localPath = file.absolutePath)) }
+            }
+        } catch (error: Throwable) {
+            files.forEach { photoStore.delete(it.absolutePath) }
+            throw error
+        }
+    }
+
+    suspend fun deletePhoto(photo: MaterialPhoto) {
+        database.materialPhotoDao().delete(photo.id)
+        photoStore.delete(photo.localPath)
+    }
 
     suspend fun save(material: Material): Long {
         require(material.name.isNotBlank()) { "Informe o nome do material." }
@@ -30,7 +53,9 @@ class MaterialRepository(private val database: AppDatabase) {
     }
 
     suspend fun move(movement: StockMovement) = database.withTransaction {
-        require(movement.quantity > 0) { "A quantidade deve ser maior que zero." }
+        require(if (movement.type == "Ajuste") movement.quantity >= 0 else movement.quantity > 0) {
+            if (movement.type == "Ajuste") "A nova quantidade não pode ser negativa." else "A quantidade deve ser maior que zero."
+        }
         require(movement.reason.isNotBlank()) { "Informe o motivo da movimentação." }
         val material = checkNotNull(dao.getById(movement.materialId)) { "O material não existe mais." }
         val delta = when (movement.type) {

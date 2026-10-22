@@ -1051,3 +1051,46 @@ Ele deve parecer uma ferramenta pessoal de acompanhamento de cultivo, com foco e
 Comece pela **Fase 1**.
 
 Não implemente as fases seguintes até que a fase atual esteja compilando e funcionando corretamente.
+
+---
+
+# 31. Estado de implementação
+
+Atualizado em 22/10/2026, após a implementação de fotos locais vinculadas aos materiais.
+
+## Implementado
+
+- Aplicativo Android nativo em Kotlin, Compose, Material 3, Navigation Compose, Room, ViewModel/Flow e WorkManager; os dados principais ficam em banco local.
+- Cultivos: criação, edição, exclusão com confirmação, lista, detalhes, status, timeline, observações, fotos locais com legenda, seleção múltipla, câmera, visualização ampliada e exclusão de fotos.
+- Colheitas: registros numerados por cultivo, data, quantidade, unidade, observação e fotos locais vinculadas; fotos podem vir da galeria ou câmera; totais agrupados por unidade; migrações Room da versão 6 para 8 preservam os dados existentes.
+- Anotações: criar, editar, excluir e buscar por título, texto ou tags; tags são normalizadas e é possível vincular uma anotação a cultivo, cultura, linhagem ou material; migração Room da versão 8 para 9 preserva dados existentes.
+- Anotações aceitam fotos locais pela galeria, com legenda opcional, visualização ampliada, exclusão e remoção dos arquivos ao excluir a foto ou anotação; migração Room da versão 9 para 10.
+- Busca local geral por texto em cultivos, culturas, linhagens, materiais e anotações, acessível pelo Dashboard e pela área “Mais”. Resultados de cultivos, culturas e linhagens abrem seus detalhes.
+- Busca permite filtrar por categoria, status/espécie/tipo/categoria/tag conforme o registro, além de intervalo de datas.
+- Dashboard mostra contagem de cultivos contaminados, próximos lembretes ativos e eventos recentes; eventos levam ao cultivo relacionado.
+- Indicadores de estoque baixo e cultivos com problemas abrem suas áreas; o Dashboard também destaca até três materiais que precisam de reposição.
+- Preferência local de aparência: claro, escuro ou seguir sistema.
+- Na inicialização, fotos sem referência no banco e com mais de 24 horas são removidas do diretório local, cobrindo arquivos órfãos deixados por importações interrompidas.
+- Backup local ZIP com manifesto versionado, banco Room, fotos locais, validação de integridade e relações; exportação e restauração disponíveis nas configurações. A restauração exige confirmação e substitui os dados atuais. O banco precisa estar na mesma versão de esquema do aplicativo.
+- Culturas e linhagens: cadastro, relações entre culturas, cultivos e linhagens e visualização da árvore de derivados.
+- Incubadoras: cadastro, associações com culturas/cultivos e registros ambientais manuais.
+- Formulários de incubadora e estoque aceitam vírgula decimal e exibem erros de validação nos diálogos; ajustes de estoque permitem zerar a quantidade sem aceitar valores negativos.
+- Materiais: cadastro, movimentações de entrada/saída/ajuste e lista de compras.
+- Materiais aceitam fotos locais selecionadas pela galeria, com visualização ampliada e exclusão; configurações do item podem ser abertas pelo detalhe, enquanto a quantidade permanece no fluxo de movimentação; migração Room da versão 10 para 11.
+- Lembretes locais e alertas de estoque agendados com WorkManager/notificações.
+- Testes instrumentados existentes cobrem repositórios principais e migrações Room; é necessário executá-los em dispositivo/emulador para validar comportamento em runtime.
+
+## Pendente ou parcial
+
+- Fluxo de câmera das fotos de colheita ainda precisa ser validado em um dispositivo/emulador.
+- Dashboard ainda pode ampliar o resumo de problemas e oferecer acesso direto a cada área do aplicativo.
+- Melhorias de acessibilidade, loading/erros, integridade de fotos associadas e testes de interface ainda precisam de uma rodada de refinamento.
+- A compilação `:app:compileDebugKotlin` foi concluída com sucesso; os testes instrumentados ainda precisam ser executados em emulador ou dispositivo.
+
+## Próximos passos
+
+1. Validar Fase 2 (Cultivos, incluindo colheitas e fotos vinculadas) em emulador/dispositivo e corrigir problemas encontrados.
+2. Fazer uma revisão de integridade das fotos locais, incluindo fotos de colheita e materiais.
+3. Completar os fluxos pendentes de Linhagens/Culturas e Incubadoras e validar suas relações.
+4. Testar exportação/restauração do Backup em emulador, incluindo cópia de fotos e preservação de relações.
+5. Refinar Dashboard, acessibilidade e estados de erro/loading; validar a limpeza de fotos em dispositivo/emulador.

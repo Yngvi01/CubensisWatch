@@ -14,14 +14,15 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class MaterialRepositoryTest {
+    private val context get() = ApplicationProvider.getApplicationContext<Context>()
     private val database by lazy {
-        Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Context>(), AppDatabase::class.java)
+        Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries().build()
     }
+    private val repository by lazy { MaterialRepository(database, LocalPhotoStore(context)) }
     @After fun tearDown() { database.close() }
 
     @Test fun tracksMovementsAndAutomaticallyMaintainsLowStockShoppingItem() = runBlocking {
-        val repository = MaterialRepository(database)
         val id = repository.save(Material(name = "Vermiculita", quantity = 1.0, unit = "kg", minimum = 0.5, ideal = 2.0))
         assertEquals(0, repository.shopping.first().size)
         repository.move(StockMovement(materialId = id, type = "Saída", quantity = 0.7, reason = "Cultivo CT-01"))
@@ -36,7 +37,6 @@ class MaterialRepositoryTest {
     }
 
     @Test fun refusesNegativeStockAndInvalidMinimumOrIdeal() = runBlocking {
-        val repository = MaterialRepository(database)
         val id = repository.save(Material(name = "Luvas", quantity = 2.0, minimum = 1.0, ideal = 4.0))
         val negative = runCatching { repository.move(StockMovement(materialId = id, type = "Saída", quantity = 3.0, reason = "Teste")) }
         val badIdeal = runCatching { repository.save(Material(name = "Inválido", minimum = 3.0, ideal = 2.0)) }

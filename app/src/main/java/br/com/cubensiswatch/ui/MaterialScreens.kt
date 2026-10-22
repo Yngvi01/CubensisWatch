@@ -1,5 +1,9 @@
 package br.com.cubensiswatch.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,6 +17,7 @@ import br.com.cubensiswatch.data.Material
 import br.com.cubensiswatch.data.ShoppingItem
 import br.com.cubensiswatch.data.StockMovement
 import br.com.cubensiswatch.data.Cultivation
+import br.com.cubensiswatch.data.MaterialPhoto
 
 private val materialCategories = listOf("Substrato", "Higiene", "Consumível", "Equipamento", "Recipiente", "Ferramenta", "Outro")
 
@@ -24,10 +29,17 @@ fun MaterialScreen(vm: MaterialViewModel) {
     var moving by remember { mutableStateOf<Pair<Long, String>?>(null) }
     var addItem by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Long?>(null) }
+    var photoGalleryMaterialId by remember { mutableStateOf<Long?>(null) }
+    var photoPickerMaterialId by remember { mutableStateOf<Long?>(null) }
+    var deletePhotoTarget by remember { mutableStateOf<MaterialPhoto?>(null) }
     val materials by vm.materials.collectAsStateWithLifecycle(initialValue = emptyList())
     val shopping by vm.shopping.collectAsStateWithLifecycle(initialValue = emptyList())
     val cultivations by vm.cultivations.collectAsStateWithLifecycle(initialValue = emptyList())
     val error by vm.error.collectAsStateWithLifecycle()
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris: List<Uri> ->
+        photoPickerMaterialId?.let { materialId -> if (uris.isNotEmpty()) vm.addPhotos(materialId, uris) }
+        photoPickerMaterialId = null
+    }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(if (purchases) "Lista de compras" else "Materiais", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(vertical = 16.dp))
@@ -57,14 +69,33 @@ fun MaterialScreen(vm: MaterialViewModel) {
             }
         }
     }
-    if (creating || editing != null) MaterialEditorDialog(editing, onDismiss = { creating = false; editing = null }) { item -> vm.save(item) { creating = false; editing = null } }
-    if (selected != null) MaterialDetailDialog(selected!!, vm, onDismiss = { selected = null }, onEdit = { id -> editing = materials.firstOrNull { it.id == id }; selected = null }, onMove = { id, type -> moving = id to type })
-    if (moving != null) MovementDialog(moving!!.first, moving!!.second, materials, cultivations, onDismiss = { moving = null }) { movement -> vm.move(movement) { moving = null } }
+    if (creating || editing != null) MaterialEditorDialog(editing, vm, onDismiss = { creating = false; editing = null }) { item -> vm.save(item) { creating = false; editing = null } }
+    if (selected != null) MaterialDetailDialog(selected!!, vm, onDismiss = { selected = null }, onEdit = { id -> editing = materials.firstOrNull { it.id == id }; selected = null }, onMove = { id, type -> moving = id to type }, onPhotos = { id -> photoGalleryMaterialId = id })
+    photoGalleryMaterialId?.let { materialId ->
+        MaterialPhotoGalleryDialog(
+            materialId = materialId,
+            materialName = materials.firstOrNull { it.id == materialId }?.name ?: "Material",
+            vm = vm,
+            onDismiss = { photoGalleryMaterialId = null },
+            onAddPhotos = { photoPickerMaterialId = materialId; photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onDeletePhoto = { deletePhotoTarget = it },
+        )
+    }
+    deletePhotoTarget?.let { photo ->
+        AlertDialog(
+            onDismissRequest = { deletePhotoTarget = null },
+            title = { Text("Excluir foto?") },
+            text = { Text("O arquivo local também será removido.") },
+            confirmButton = { TextButton(onClick = { vm.deletePhoto(photo); deletePhotoTarget = null }) { Text("Excluir", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { deletePhotoTarget = null }) { Text("Cancelar") } },
+        )
+    }
+    if (moving != null) MovementDialog(moving!!.first, moving!!.second, materials, cultivations, vm, onDismiss = { moving = null }) { movement -> vm.move(movement) { moving = null } }
     if (addItem) SimpleTextDialog("Novo item de compra", "Nome do item", onDismiss = { addItem = false }) { vm.addShopping(it); addItem = false }
 }
 
 @Composable
-private fun MaterialEditorDialog(initial: Material?, onDismiss: () -> Unit, onSave: (Material) -> Unit) {
+private fun MaterialEditorDialog(initial: Material?, vm: MaterialViewModel, onDismiss: () -> Unit, onSave: (Material) -> Unit) {
     var name by remember(initial?.id) { mutableStateOf(initial?.name.orEmpty()) }
     var category by remember(initial?.id) { mutableStateOf(initial?.category ?: "Outro") }
     var unit by remember(initial?.id) { mutableStateOf(initial?.unit ?: "un") }
@@ -73,8 +104,12 @@ private fun MaterialEditorDialog(initial: Material?, onDismiss: () -> Unit, onSa
     var ideal by remember(initial?.id) { mutableStateOf(initial?.ideal?.toString() ?: "0") }
     var location by remember(initial?.id) { mutableStateOf(initial?.location.orEmpty()) }
     var notes by remember(initial?.id) { mutableStateOf(initial?.notes.orEmpty()) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (initial == null) "Novo material" else "Editar material") },
+    var validationError by remember(initial?.id) { mutableStateOf<String?>(null) }
+    val repositoryError by vm.error.collectAsStateWithLifecycle()
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (initial == null) "Novo material" else "Editar configurações do material") },
         text = { Column(Modifier.heightIn(max = 560.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (validationError != null) Text(validationError!!, color = MaterialTheme.colorScheme.error)
+            if (repositoryError != null) Text(repositoryError!!, color = MaterialTheme.colorScheme.error)
             OutlinedTextField(name, { name = it }, label = { Text("Nome *") }, singleLine = true)
             MenuField("Categoria: $category", materialCategories) { category = it }
             OutlinedTextField(unit, { unit = it }, label = { Text("Unidade") }, singleLine = true)
@@ -84,19 +119,31 @@ private fun MaterialEditorDialog(initial: Material?, onDismiss: () -> Unit, onSa
             OutlinedTextField(location, { location = it }, label = { Text("Local") }, singleLine = true)
             OutlinedTextField(notes, { notes = it }, label = { Text("Observações") })
         } }, confirmButton = { TextButton(onClick = {
-            val qty = quantity.toDoubleOrNull() ?: 0.0; val min = minimum.toDoubleOrNull() ?: 0.0; val target = ideal.toDoubleOrNull() ?: 0.0
-            onSave(Material(initial?.id ?: 0, name, category, qty, unit, min, target, location, notes, initial?.lastPurchaseAt, initial?.price))
+            val qty = quantity.trim().replace(',', '.').toDoubleOrNull()
+            val min = minimum.trim().replace(',', '.').toDoubleOrNull()
+            val target = ideal.trim().replace(',', '.').toDoubleOrNull()
+            validationError = when {
+                name.isBlank() -> "Informe o nome do material."
+                qty == null || min == null || target == null -> "Confira os valores numéricos informados."
+                qty < 0 || min < 0 || target < min -> "O estoque não pode ser negativo e o ideal deve ser igual ou maior que o mínimo."
+                else -> null
+            }
+            if (validationError == null) onSave(Material(initial?.id ?: 0, name, category, qty!!, unit, min!!, target!!, location, notes, initial?.lastPurchaseAt, initial?.price))
         }) { Text("Salvar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
 }
 
 @Composable
-private fun MaterialDetailDialog(id: Long, vm: MaterialViewModel, onDismiss: () -> Unit, onEdit: (Long) -> Unit, onMove: (Long, String) -> Unit) {
+private fun MaterialDetailDialog(id: Long, vm: MaterialViewModel, onDismiss: () -> Unit, onEdit: (Long) -> Unit, onMove: (Long, String) -> Unit, onPhotos: (Long) -> Unit) {
     val material by vm.material(id).collectAsStateWithLifecycle(initialValue = null)
     val movements by vm.movements(id).collectAsStateWithLifecycle(initialValue = emptyList())
+    val photos by vm.photos(id).collectAsStateWithLifecycle(initialValue = emptyList())
     AlertDialog(onDismissRequest = onDismiss, title = { Text(material?.name ?: "Material") }, text = {
         Column(Modifier.heightIn(max = 500.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (material != null) {
                 Text("${material!!.quantity.pretty()} ${material!!.unit} · mínimo ${material!!.minimum.pretty()} · ideal ${material!!.ideal.pretty()}")
+                Text("${material!!.category}${material!!.location.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (material!!.notes.isNotBlank()) Text(material!!.notes)
+                OutlinedButton(onClick = { onPhotos(id) }) { Text("Fotos do item (${photos.size})") }
                 Text("Histórico", style = MaterialTheme.typography.titleMedium)
             }
             if (movements.isEmpty()) Text("Nenhuma movimentação registrada.")
@@ -107,18 +154,53 @@ private fun MaterialDetailDialog(id: Long, vm: MaterialViewModel, onDismiss: () 
                 TextButton(onClick = { onMove(id, "Ajuste") }) { Text("Ajuste") }
             }
         }
-    }, confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } }, dismissButton = { TextButton(onClick = { onEdit(id) }) { Text("Editar") } })
+    }, confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } }, dismissButton = { TextButton(onClick = { onEdit(id) }) { Text("Editar configurações") } })
 }
 
 @Composable
-private fun MovementDialog(id: Long, type: String, materials: List<Material>, cultivations: List<Cultivation>, onDismiss: () -> Unit, onSave: (StockMovement) -> Unit) {
+private fun MaterialPhotoGalleryDialog(
+    materialId: Long,
+    materialName: String,
+    vm: MaterialViewModel,
+    onDismiss: () -> Unit,
+    onAddPhotos: () -> Unit,
+    onDeletePhoto: (MaterialPhoto) -> Unit,
+) {
+    val photos by vm.photos(materialId).collectAsStateWithLifecycle(initialValue = emptyList())
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Fotos · $materialName") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = onAddPhotos) { Text("＋ Adicionar fotos") }
+                if (photos.isEmpty()) {
+                    Text("Nenhuma foto adicionada a este item.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 460.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(photos, key = { it.id }) { photo ->
+                            LocalPhotoCard(photo.localPath, photo.caption, photo.capturedAt) { onDeletePhoto(photo) }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+    )
+}
+
+@Composable
+private fun MovementDialog(id: Long, type: String, materials: List<Material>, cultivations: List<Cultivation>, vm: MaterialViewModel, onDismiss: () -> Unit, onSave: (StockMovement) -> Unit) {
     val material = materials.firstOrNull { it.id == id } ?: return
     var quantity by remember { mutableStateOf("") }
     var reason by remember { mutableStateOf(if (type == "Entrada") "Compra" else "Consumo") }
     var notes by remember { mutableStateOf("") }
     var cultivationId by remember { mutableStateOf<Long?>(null) }
     var showCultivations by remember { mutableStateOf(false) }
+    var validationError by remember { mutableStateOf<String?>(null) }
+    val repositoryError by vm.error.collectAsStateWithLifecycle()
     AlertDialog(onDismissRequest = onDismiss, title = { Text("$type de ${material.name}") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (validationError != null) Text(validationError!!, color = MaterialTheme.colorScheme.error)
+        if (repositoryError != null) Text(repositoryError!!, color = MaterialTheme.colorScheme.error)
         Text("Disponível: ${material.quantity.pretty()} ${material.unit}")
         OutlinedTextField(quantity, { quantity = it }, label = { Text(if (type == "Ajuste") "Nova quantidade" else "Quantidade") }, singleLine = true)
         OutlinedTextField(reason, { reason = it }, label = { Text("Motivo *") }, singleLine = true)
@@ -129,13 +211,24 @@ private fun MovementDialog(id: Long, type: String, materials: List<Material>, cu
             }
         }
         OutlinedTextField(notes, { notes = it }, label = { Text("Observação") })
-    } }, confirmButton = { TextButton(onClick = { quantity.toDoubleOrNull()?.let { onSave(StockMovement(materialId = id, type = type, quantity = it, reason = reason, cultivationId = cultivationId, notes = notes)) } }) { Text("Registrar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
+    } }, confirmButton = { TextButton(onClick = {
+        val amount = quantity.trim().replace(',', '.').toDoubleOrNull()
+        validationError = when {
+            amount == null -> "Informe uma quantidade válida."
+            type == "Ajuste" && amount < 0 -> "A nova quantidade não pode ser negativa."
+            type != "Ajuste" && amount <= 0 -> "A quantidade deve ser maior que zero."
+            reason.isBlank() -> "Informe o motivo da movimentação."
+            else -> null
+        }
+        if (validationError == null) onSave(StockMovement(materialId = id, type = type, quantity = amount!!, reason = reason, cultivationId = cultivationId, notes = notes))
+    }) { Text("Registrar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
 }
 
 @Composable
 private fun ShoppingRow(item: ShoppingItem, material: Material?, vm: MaterialViewModel, onPurchase: (Long) -> Unit) {
     var qtyDialog by remember { mutableStateOf(false) }
     var qty by remember { mutableStateOf("") }
+    var validationError by remember { mutableStateOf<String?>(null) }
     Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Row { Checkbox(item.checked, { vm.check(item, it) }); Column(Modifier.padding(top = 12.dp)) { Text(item.name); if (material != null) Text("Atual ${material.quantity.pretty()} ${material.unit}", style = MaterialTheme.typography.bodySmall) } }
@@ -144,8 +237,15 @@ private fun ShoppingRow(item: ShoppingItem, material: Material?, vm: MaterialVie
         if (material != null && !item.checked) TextButton(onClick = { qtyDialog = true }) { Text("Registrar compra e repor estoque") }
     } }
     if (qtyDialog && material != null) AlertDialog(onDismissRequest = { qtyDialog = false }, title = { Text("Reposição de ${material.name}") },
-        text = { OutlinedTextField(qty, { qty = it }, label = { Text("Quantidade comprada (${material.unit})") }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { qty.toDoubleOrNull()?.let { amount -> vm.move(StockMovement(materialId = material.id, type = "Entrada", quantity = amount, reason = "Compra")) { if (material.quantity + amount >= material.minimum) vm.check(item, true) }; qtyDialog = false } }) { Text("Registrar") } },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (validationError != null) Text(validationError!!, color = MaterialTheme.colorScheme.error)
+            OutlinedTextField(qty, { qty = it; validationError = null }, label = { Text("Quantidade comprada (${material.unit})") }, singleLine = true)
+        } },
+        confirmButton = { TextButton(onClick = {
+            val amount = qty.trim().replace(',', '.').toDoubleOrNull()
+            if (amount == null || amount <= 0) validationError = "Informe uma quantidade válida maior que zero."
+            else { vm.move(StockMovement(materialId = material.id, type = "Entrada", quantity = amount, reason = "Compra")) { if (material.quantity + amount >= material.minimum) vm.check(item, true) }; qtyDialog = false }
+        }) { Text("Registrar") } },
         dismissButton = { TextButton(onClick = { qtyDialog = false }) { Text("Cancelar") } })
 }
 

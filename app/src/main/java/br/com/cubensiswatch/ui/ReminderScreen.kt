@@ -3,6 +3,7 @@ package br.com.cubensiswatch.ui
 import android.Manifest
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,13 +18,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import br.com.cubensiswatch.data.LocalBackupManager
 import br.com.cubensiswatch.data.Reminder
 import br.com.cubensiswatch.notifications.LocalNotifications
 import java.text.DateFormat
 import java.util.Calendar
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
-fun ReminderScreen(viewModel: ReminderViewModel) {
+fun ReminderScreen(viewModel: ReminderViewModel, themeMode: String = "system", onThemeModeChange: (String) -> Unit = {}, backupManager: LocalBackupManager? = null) {
     val context = LocalContext.current
     val reminders by viewModel.reminders.collectAsStateWithLifecycle(initialValue = emptyList())
     val error by viewModel.error.collectAsStateWithLifecycle()
@@ -31,10 +36,56 @@ fun ReminderScreen(viewModel: ReminderViewModel) {
     var creating by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<Reminder?>(null) }
     var permissionGranted by remember { mutableStateOf(LocalNotifications.hasPermission(context)) }
+    var backupBusy by remember { mutableStateOf(false) }
+    var backupStatus by remember { mutableStateOf<String?>(null) }
+    var pendingRestore by remember { mutableStateOf<Uri?>(null) }
+    val scope = rememberCoroutineScope()
+    val exportBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null && backupManager != null) scope.launch {
+            backupBusy = true
+            backupStatus = null
+            backupStatus = runCatching { withContext(Dispatchers.IO) { backupManager.export(uri) }; "Backup exportado com sucesso." }
+                .getOrElse { "Falha ao exportar: ${it.message ?: "erro desconhecido"}" }
+            backupBusy = false
+        }
+    }
+    val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> pendingRestore = uri }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionGranted = it }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("Lembretes e notificações", style = MaterialTheme.typography.headlineMedium) }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Backup local", style = MaterialTheme.typography.titleMedium)
+                    Text("O arquivo inclui o banco e as fotos armazenadas pelo aplicativo.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { exportBackup.launch("cubensiswatch-backup.zip") }, enabled = !backupBusy) { Text("Exportar ZIP") }
+                        OutlinedButton(onClick = { importBackup.launch(arrayOf("*/*")) }, enabled = !backupBusy) { Text("Restaurar ZIP") }
+                    }
+                    if (backupBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    backupStatus?.let { Text(it, color = if (it.startsWith("Falha")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) }
+                }
+            }
+        }
+        item {
+            var themeMenu by remember { mutableStateOf(false) }
+            val options = listOf("system" to "Seguir sistema", "light" to "Claro", "dark" to "Escuro")
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Aparência", style = MaterialTheme.typography.titleMedium)
+                    Text("Escolha como o aplicativo será exibido.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box {
+                        OutlinedButton(onClick = { themeMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text(options.firstOrNull { it.first == themeMode }?.second ?: "Seguir sistema")
+                        }
+                        DropdownMenu(themeMenu, { themeMenu = false }) {
+                            options.forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { onThemeModeChange(value); themeMenu = false }) }
+                        }
+                    }
+                }
+            }
+        }
         item {
             Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Alertas locais", style = MaterialTheme.typography.titleMedium)
@@ -62,6 +113,26 @@ fun ReminderScreen(viewModel: ReminderViewModel) {
     }
     if (creating) ReminderEditorDialog(editing, onDismiss = { creating = false; editing = null }) { reminder -> viewModel.save(reminder) { creating = false; editing = null } }
     deleteTarget?.let { reminder -> AlertDialog(onDismissRequest = { deleteTarget = null }, title = { Text("Excluir lembrete?") }, text = { Text("O agendamento deste lembrete também será cancelado.") }, confirmButton = { TextButton(onClick = { viewModel.delete(reminder); deleteTarget = null }) { Text("Excluir") } }, dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancelar") } }) }
+    pendingRestore?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null },
+            title = { Text("Restaurar backup?") },
+            text = { Text("A restauração substitui os dados atuais do aplicativo. Esta ação não pode ser desfeita. Continue somente se deseja trocar seus registros pelo conteúdo do arquivo selecionado.") },
+            confirmButton = {
+                TextButton(enabled = !backupBusy, onClick = {
+                    pendingRestore = null
+                    if (backupManager != null) scope.launch {
+                        backupBusy = true
+                        backupStatus = null
+                        backupStatus = runCatching { withContext(Dispatchers.IO) { backupManager.restore(uri) }; "Backup restaurado com sucesso." }
+                            .getOrElse { "Falha ao restaurar: ${it.message ?: "erro desconhecido"}" }
+                        backupBusy = false
+                    }
+                }) { Text("Restaurar", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { pendingRestore = null }) { Text("Cancelar") } },
+        )
+    }
 }
 
 @Composable

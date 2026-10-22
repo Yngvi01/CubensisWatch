@@ -20,7 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.com.cubensiswatch.data.Cultivation
 import br.com.cubensiswatch.data.CultivationEvent
@@ -28,6 +31,8 @@ import br.com.cubensiswatch.data.Culture
 import br.com.cubensiswatch.data.Lineage
 import br.com.cubensiswatch.data.Photo
 import br.com.cubensiswatch.data.Incubator
+import br.com.cubensiswatch.data.Harvest
+import br.com.cubensiswatch.data.HarvestPhoto
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -38,6 +43,7 @@ import kotlinx.coroutines.withContext
 val cultivationStatuses = listOf("Planejado", "Preparação", "Incubação", "Colonização", "Frutificação", "Colheita", "Finalizado", "Contaminado", "Descartado")
 private val dateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy · HH:mm").withZone(ZoneId.systemDefault())
 private val dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy").withZone(ZoneId.systemDefault())
+private data class PendingCultivationPhoto(val uri: Uri? = null, val file: File? = null)
 
 @Composable
 fun CultivationListScreen(viewModel: CultivationViewModel, onCreate: () -> Unit, onOpen: (Long) -> Unit) {
@@ -174,27 +180,58 @@ fun CultivationEditorScreen(
 fun CultivationDetailScreen(
     id: Long,
     viewModel: CultivationViewModel,
+    onBack: () -> Unit,
     onEdit: () -> Unit,
     onDeleted: () -> Unit,
 ) {
     val cultivation by viewModel.cultivation(id).collectAsStateWithLifecycle(initialValue = null)
     val events by viewModel.events(id).collectAsStateWithLifecycle(initialValue = emptyList())
     val photos by viewModel.photos(id).collectAsStateWithLifecycle(initialValue = emptyList())
+    val harvests by viewModel.harvests(id).collectAsStateWithLifecycle(initialValue = emptyList())
     val error by viewModel.error.collectAsStateWithLifecycle()
     var observationOpen by remember { mutableStateOf(false) }
+    var harvestOpen by remember { mutableStateOf(false) }
+    var harvestToDelete by remember { mutableStateOf<Harvest?>(null) }
     var deleteConfirmOpen by remember { mutableStateOf(false) }
-    var photoCaption by remember { mutableStateOf("") }
+    var photoSourceOpen by remember { mutableStateOf(false) }
+    var pendingPhotos by remember { mutableStateOf(emptyList<PendingCultivationPhoto>()) }
+    var pendingPhotoTotal by remember { mutableIntStateOf(0) }
+    var photoDescription by remember { mutableStateOf("") }
     var pendingDeletePhoto by remember { mutableStateOf<Photo?>(null) }
+    var pendingDeleteHarvestPhoto by remember { mutableStateOf<HarvestPhoto?>(null) }
+    var harvestForPhotoPicker by remember { mutableStateOf<Harvest?>(null) }
+    var harvestPhotoSourceTarget by remember { mutableStateOf<Harvest?>(null) }
+    var harvestForCamera by remember { mutableStateOf<Harvest?>(null) }
     var captureFile by remember { mutableStateOf<File?>(null) }
+    var harvestCaptureFile by remember { mutableStateOf<File?>(null) }
     val context = LocalContext.current
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { selected: List<Uri> ->
-        if (selected.isNotEmpty()) viewModel.addPhotos(id, selected, photoCaption)
+        if (selected.isNotEmpty()) {
+            pendingPhotos = selected.map { PendingCultivationPhoto(uri = it) }
+            pendingPhotoTotal = selected.size
+        }
+    }
+    val harvestPhotoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { selected: List<Uri> ->
+        harvestForPhotoPicker?.let { harvest -> if (selected.isNotEmpty()) viewModel.addHarvestPhotos(harvest, selected) }
+        harvestForPhotoPicker = null
+    }
+    val harvestCamera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        val file = harvestCaptureFile
+        val harvest = harvestForCamera
+        harvestCaptureFile = null
+        harvestForCamera = null
+        if (file != null) {
+            if (saved && harvest != null) viewModel.addCapturedHarvestPhoto(harvest.id, file) else file.delete()
+        }
     }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
         val file = captureFile
         captureFile = null
         if (file != null) {
-            if (saved) viewModel.addCapturedPhoto(id, file, photoCaption) else file.delete()
+            if (saved) {
+                pendingPhotos = listOf(PendingCultivationPhoto(file = file))
+                pendingPhotoTotal = 1
+            } else file.delete()
         }
     }
 
@@ -207,12 +244,15 @@ fun CultivationDetailScreen(
     val item = cultivation!!
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onBack) { Text("← Voltar para todos os cultivos") }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) {
                     Text(item.name, style = MaterialTheme.typography.headlineMedium)
                     Text("${item.code} · ${item.species.ifBlank { "Espécie não informada" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(onClick = onEdit) { Text("Editar") }
+                }
             }
         }
         if (error != null) item { ErrorMessage(error!!) { viewModel.clearError() } }
@@ -240,31 +280,41 @@ fun CultivationDetailScreen(
             }
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth()) {
                 Button(onClick = { observationOpen = true }, modifier = Modifier.weight(1f)) { Text("＋ Observação") }
-                OutlinedButton(onClick = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, modifier = Modifier.weight(1f)) { Text("＋ Fotos") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { photoSourceOpen = true }, modifier = Modifier.weight(1f)) { Text("＋ Adicionar fotos") }
             }
         }
         item {
-            OutlinedButton(
-                onClick = {
-                    viewModel.createCaptureFile { file ->
-                        if (file != null) {
-                            captureFile = file
-                            runCatching {
-                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                                camera.launch(uri)
-                            }.onFailure {
-                                file.delete()
-                                captureFile = null
-                                viewModel.reportError("Não foi possível abrir a câmera neste dispositivo.")
-                            }
-                        }
-                    }
-                }, modifier = Modifier.fillMaxWidth(),
-            ) { Text("＋ Tirar foto") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Colheitas", style = MaterialTheme.typography.titleLarge)
+                OutlinedButton(onClick = { harvestOpen = true }) { Text("＋ Registrar") }
+            }
         }
-        item { OutlinedTextField(value = photoCaption, onValueChange = { photoCaption = it }, label = { Text("Legenda das próximas fotos (opcional)") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+        if (harvests.isEmpty()) item { Text("Nenhuma colheita registrada.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        items(harvests, key = { "harvest-${it.id}" }) { harvest ->
+            val harvestPhotos by viewModel.harvestPhotos(harvest.id).collectAsStateWithLifecycle(initialValue = emptyList())
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("Colheita ${harvest.number} — ${harvest.quantity.prettyQuantity()} ${harvest.unit}", style = MaterialTheme.typography.titleMedium)
+                            Text(dateFormatter.format(Instant.ofEpochMilli(harvest.harvestedAt)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (harvest.notes.isNotBlank()) Text(harvest.notes)
+                        }
+                        TextButton(onClick = { harvestToDelete = harvest }) { Text("Excluir") }
+                    }
+                    OutlinedButton(onClick = { harvestPhotoSourceTarget = harvest }) { Text("＋ Fotos da colheita") }
+                    harvestPhotos.forEach { photo -> LocalPhotoCard(photo.localPath, photo.caption, photo.capturedAt) { pendingDeleteHarvestPhoto = photo } }
+                }
+            }
+        }
+        harvests.groupBy { it.unit }.forEach { (unit, records) ->
+            item(key = "harvest-total-$unit") {
+                Text("Total: ${records.sumOf { it.quantity }.prettyQuantity()} $unit", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            }
+        }
         if (photos.isNotEmpty()) {
             item { Text("Fotos", style = MaterialTheme.typography.titleLarge) }
             items(photos, key = { "photo-${it.id}" }) { photo ->
@@ -284,6 +334,117 @@ fun CultivationDetailScreen(
     if (observationOpen) ObservationDialog(
         onDismiss = { observationOpen = false },
         onSave = { text, temperature, humidity -> viewModel.addObservation(id, text, temperature, humidity); observationOpen = false },
+    )
+    if (harvestOpen) HarvestDialog(
+        onDismiss = { harvestOpen = false },
+        onSave = { quantity, unit, harvestedAt, notes -> viewModel.addHarvest(id, quantity, unit, harvestedAt, notes); harvestOpen = false },
+    )
+    harvestPhotoSourceTarget?.let { harvest ->
+        AlertDialog(
+            onDismissRequest = { harvestPhotoSourceTarget = null },
+            title = { Text("Fotos da colheita ${harvest.number}") },
+            text = { Text("Escolha uma imagem da galeria ou tire uma foto agora.") },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        harvestPhotoSourceTarget = null
+                        harvestForPhotoPicker = harvest
+                        harvestPhotoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }) { Text("Galeria") }
+                    Button(onClick = {
+                        harvestPhotoSourceTarget = null
+                        viewModel.createCaptureFile { file ->
+                            if (file != null) {
+                                harvestCaptureFile = file
+                                harvestForCamera = harvest
+                                runCatching {
+                                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                                    harvestCamera.launch(uri)
+                                }.onFailure {
+                                    file.delete()
+                                    harvestCaptureFile = null
+                                    harvestForCamera = null
+                                    viewModel.reportError("Não foi possível abrir a câmera neste dispositivo.")
+                                }
+                            }
+                        }
+                    }) { Text("Câmera") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { harvestPhotoSourceTarget = null }) { Text("Cancelar") } },
+        )
+    }
+    harvestToDelete?.let { harvest ->
+        AlertDialog(
+            onDismissRequest = { harvestToDelete = null },
+            title = { Text("Excluir colheita?") },
+            text = { Text("A colheita ${harvest.number} será removida do histórico.") },
+            confirmButton = { TextButton(onClick = { harvestToDelete = null; viewModel.deleteHarvest(harvest) }) { Text("Excluir", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { harvestToDelete = null }) { Text("Cancelar") } },
+        )
+    }
+    pendingDeleteHarvestPhoto?.let { photo ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteHarvestPhoto = null },
+            title = { Text("Excluir foto da colheita?") },
+            text = { Text("O arquivo local também será removido.") },
+            confirmButton = { TextButton(onClick = { pendingDeleteHarvestPhoto = null; viewModel.deleteHarvestPhoto(photo) }) { Text("Excluir", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(onClick = { pendingDeleteHarvestPhoto = null }) { Text("Cancelar") } },
+        )
+    }
+    if (photoSourceOpen) AlertDialog(
+        onDismissRequest = { photoSourceOpen = false },
+        title = { Text("Adicionar fotos") },
+        text = { Text("Escolha como deseja adicionar imagens a este cultivo.") },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = {
+                    photoSourceOpen = false
+                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }) { Text("Selecionar fotos") }
+                Button(onClick = {
+                    photoSourceOpen = false
+                    viewModel.createCaptureFile { file ->
+                        if (file != null) {
+                            captureFile = file
+                            runCatching {
+                                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                                camera.launch(uri)
+                            }.onFailure {
+                                file.delete()
+                                captureFile = null
+                                viewModel.reportError("Não foi possível abrir a câmera neste dispositivo.")
+                            }
+                        }
+                    }
+                }) { Text("Abrir câmera") }
+            }
+        },
+        dismissButton = { TextButton(onClick = { photoSourceOpen = false }) { Text("Cancelar") } },
+    )
+    val pendingPhoto = pendingPhotos.firstOrNull()
+    if (pendingPhoto != null) PhotoDescriptionDialog(
+        index = pendingPhotoTotal - pendingPhotos.size + 1,
+        total = pendingPhotoTotal,
+        value = photoDescription,
+        onValueChange = { photoDescription = it },
+        onDismiss = {
+            pendingPhotos.forEach { it.file?.delete() }
+            pendingPhotos = emptyList()
+            pendingPhotoTotal = 0
+            photoDescription = ""
+        },
+        onSave = { caption ->
+            val next = {
+                pendingPhotos = pendingPhotos.drop(1)
+                if (pendingPhotos.size <= 1) pendingPhotoTotal = 0
+                photoDescription = ""
+            }
+            when {
+                pendingPhoto.uri != null -> viewModel.addPhotos(id, listOf(pendingPhoto.uri), caption, next)
+                pendingPhoto.file != null -> viewModel.addCapturedPhoto(id, pendingPhoto.file, caption, next)
+            }
+        },
     )
     if (deleteConfirmOpen) AlertDialog(
         onDismissRequest = { deleteConfirmOpen = false },
@@ -378,6 +539,7 @@ private fun PhotoCard(photo: Photo, onDelete: () -> Unit) =
 
 @Composable
 fun LocalPhotoCard(localPath: String, caption: String, capturedAt: Long, onDelete: () -> Unit) {
+    var fullScreen by remember(localPath) { mutableStateOf(false) }
     val bitmap by produceState<ImageBitmap?>(null, localPath) {
         value = withContext(Dispatchers.IO) {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -389,7 +551,14 @@ fun LocalPhotoCard(localPath: String, caption: String, capturedAt: Long, onDelet
     }
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
         Column {
-            bitmap?.let { Image(it, contentDescription = caption.ifBlank { "Foto do registro" }, modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp), contentScale = ContentScale.Crop) }
+            bitmap?.let {
+                Image(
+                    it,
+                    contentDescription = "Ampliar ${caption.ifBlank { "foto do registro" }}",
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).clickable { fullScreen = true },
+                    contentScale = ContentScale.Crop,
+                )
+            }
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) {
                     Text(caption.ifBlank { "Foto" }, style = MaterialTheme.typography.titleSmall)
@@ -399,6 +568,58 @@ fun LocalPhotoCard(localPath: String, caption: String, capturedAt: Long, onDelet
             }
         }
     }
+    if (fullScreen && bitmap != null) Dialog(
+        onDismissRequest = { fullScreen = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.96f).padding(8.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = Color.Black,
+        ) {
+            Column(Modifier.fillMaxSize().padding(12.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(caption.ifBlank { "Foto" }, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    TextButton(onClick = { fullScreen = false }) { Text("Fechar", color = Color.White) }
+                }
+                Image(
+                    bitmap = bitmap!!,
+                    contentDescription = caption.ifBlank { "Foto ampliada" },
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentScale = ContentScale.Fit,
+                )
+                Text(dateTimeFormatter.format(Instant.ofEpochMilli(capturedAt)), color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotoDescriptionDialog(
+    index: Int,
+    total: Int,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Adicionar descrição?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (total > 1) "Foto $index de $total. A descrição é opcional." else "A descrição da foto é opcional.")
+                OutlinedTextField(value = value, onValueChange = onValueChange, label = { Text("Descrição") }, placeholder = { Text("Ex.: aparência, mudança ou detalhe") }, minLines = 2)
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(value) }) { Text("Salvar foto") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onSave("") }) { Text("Continuar sem descrição") }
+                TextButton(onClick = onDismiss) { Text("Cancelar") }
+            }
+        },
+    )
 }
 
 @Composable
@@ -420,6 +641,40 @@ private fun ObservationDialog(onDismiss: () -> Unit, onSave: (String, String, St
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun HarvestDialog(onDismiss: () -> Unit, onSave: (String, String, Long, String) -> Unit) {
+    var quantity by remember { mutableStateOf("") }
+    var unit by remember { mutableStateOf("g") }
+    var notes by remember { mutableStateOf("") }
+    var harvestedAt by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var datePickerOpen by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Registrar colheita") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(quantity, { quantity = it }, label = { Text("Quantidade *") }, singleLine = true)
+                OutlinedTextField(unit, { unit = it }, label = { Text("Unidade (g, kg, un...) *") }, singleLine = true)
+                OutlinedButton(onClick = { datePickerOpen = true }, modifier = Modifier.fillMaxWidth()) { Text("Data: ${dateFormatter.format(Instant.ofEpochMilli(harvestedAt))}") }
+                OutlinedTextField(notes, { notes = it }, label = { Text("Observação (opcional)") }, minLines = 2)
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(quantity, unit, harvestedAt, notes) }, enabled = (quantity.trim().replace(',', '.').toDoubleOrNull() ?: 0.0) > 0.0 && unit.isNotBlank()) { Text("Salvar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+    if (datePickerOpen) {
+        val picker = rememberDatePickerState(initialSelectedDateMillis = harvestedAt)
+        DatePickerDialog(
+            onDismissRequest = { datePickerOpen = false },
+            confirmButton = { TextButton(onClick = { picker.selectedDateMillis?.let { harvestedAt = it }; datePickerOpen = false }) { Text("Confirmar") } },
+            dismissButton = { TextButton(onClick = { datePickerOpen = false }) { Text("Cancelar") } },
+        ) { DatePicker(state = picker) }
+    }
+}
+
+private fun Double.prettyQuantity(): String = if (this % 1.0 == 0.0) toLong().toString() else toString()
 
 @Composable
 private fun ErrorMessage(message: String, onDismiss: () -> Unit) {

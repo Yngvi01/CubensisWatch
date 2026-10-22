@@ -16,6 +16,9 @@ interface PhotoDao {
     @Query("SELECT * FROM photos WHERE cultivationId = :cultivationId")
     suspend fun getForCultivation(cultivationId: Long): List<Photo>
 
+    @Query("SELECT localPath FROM photos")
+    suspend fun getAllLocalPaths(): List<String>
+
     @Query("DELETE FROM photos WHERE id = :photoId")
     suspend fun delete(photoId: Long)
 }

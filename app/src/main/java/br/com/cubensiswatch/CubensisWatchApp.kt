@@ -8,6 +8,8 @@ import br.com.cubensiswatch.data.LineageRepository
 import br.com.cubensiswatch.data.IncubatorRepository
 import br.com.cubensiswatch.data.MaterialRepository
 import br.com.cubensiswatch.data.ReminderRepository
+import br.com.cubensiswatch.data.NoteRepository
+import br.com.cubensiswatch.data.LocalBackupManager
 import br.com.cubensiswatch.notifications.LocalNotifications
 import br.com.cubensiswatch.notifications.ReminderScheduler
 import br.com.cubensiswatch.notifications.StockAlertScheduler
@@ -23,8 +25,10 @@ class CubensisWatchApp : Application() {
     val cultivationRepository by lazy { CultivationRepository(database, photoStore) }
     val lineageRepository by lazy { LineageRepository(database, photoStore) }
     val incubatorRepository by lazy { IncubatorRepository(database.incubatorDao()) }
-    val materialRepository by lazy { MaterialRepository(database) }
+    val materialRepository by lazy { MaterialRepository(database, photoStore) }
     val reminderRepository by lazy { ReminderRepository(this, database.reminderDao()) }
+    val noteRepository by lazy { NoteRepository(database, photoStore) }
+    val backupManager by lazy { LocalBackupManager(this, database, photoStore) }
 
     override fun onCreate() {
         super.onCreate()
@@ -32,6 +36,14 @@ class CubensisWatchApp : Application() {
         StockAlertScheduler.schedule(this)
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             database.reminderDao().observeAll().first().filter { it.enabled }.forEach { ReminderScheduler.schedule(this@CubensisWatchApp, it) }
+            val referencedPhotoPaths = buildSet {
+                addAll(database.photoDao().getAllLocalPaths())
+                addAll(database.culturePhotoDao().getAllLocalPaths())
+                addAll(database.harvestPhotoDao().getAllLocalPaths())
+                addAll(database.notePhotoDao().getAllLocalPaths())
+                addAll(database.materialPhotoDao().getAllLocalPaths())
+            }
+            photoStore.deleteOrphans(referencedPhotoPaths)
         }
     }
 }

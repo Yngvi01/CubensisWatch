@@ -31,5 +31,24 @@ class LocalPhotoStore(context: Context) {
             }
     }
 
+    suspend fun copyIntoStore(source: File): File = withContext(Dispatchers.IO) {
+        require(source.isFile) { "O arquivo de foto não existe." }
+        check(photoDirectory.exists() || photoDirectory.mkdirs()) { "Não foi possível preparar o armazenamento de fotos." }
+        val target = File(photoDirectory, "${UUID.randomUUID()}.jpg")
+        try {
+            source.inputStream().use { input -> target.outputStream().use(input::copyTo) }
+            target
+        } catch (error: Throwable) {
+            target.delete()
+            throw error
+        }
+    }
+
     suspend fun delete(path: String) = withContext(Dispatchers.IO) { File(path).takeIf { it.parentFile == photoDirectory }?.delete() }
+
+    suspend fun deleteOrphans(referencedPaths: Set<String>, olderThan: Long = System.currentTimeMillis() - 24L * 60L * 60L * 1000L) = withContext(Dispatchers.IO) {
+        photoDirectory.listFiles()?.filter { file ->
+            file.isFile && file.absolutePath !in referencedPaths && file.lastModified() < olderThan
+        }?.forEach(File::delete)
+    }
 }

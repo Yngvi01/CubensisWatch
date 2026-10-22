@@ -13,10 +13,67 @@ class CultivationRepository(
     val cultivations = dao.observeAll()
     val activeCount = dao.observeActiveCount()
     val incubatingCount = dao.observeIncubatingCount()
+    val problemCount = dao.observeProblemCount()
 
     fun observeCultivation(id: Long) = dao.observeById(id)
     fun observeEvents(id: Long): Flow<List<CultivationEvent>> = database.eventDao().observeForCultivation(id)
+    fun observeRecentEvents(limit: Int = 6): Flow<List<CultivationEvent>> = database.eventDao().observeRecent(limit)
     fun observePhotos(id: Long): Flow<List<Photo>> = database.photoDao().observeForCultivation(id)
+    fun observeHarvests(id: Long): Flow<List<Harvest>> = database.harvestDao().observeForCultivation(id)
+    fun observeHarvestPhotos(harvestId: Long): Flow<List<HarvestPhoto>> = database.harvestPhotoDao().observeForHarvest(harvestId)
+
+    suspend fun addHarvestPhotos(harvestId: Long, uris: List<Uri>, caption: String = "") {
+        require(uris.isNotEmpty()) { "Selecione ao menos uma foto." }
+        val dao = database.harvestPhotoDao()
+        val files = mutableListOf<File>()
+        try {
+            uris.forEach { files += photoStore.import(it) }
+            database.withTransaction {
+                checkNotNull(database.harvestDao().getById(harvestId)) { "Colheita não encontrada." }
+                files.forEach { file -> dao.insert(HarvestPhoto(harvestId = harvestId, localPath = file.absolutePath, caption = caption.trim())) }
+            }
+        } catch (error: Throwable) {
+            files.forEach { photoStore.delete(it.absolutePath) }
+            throw error
+        }
+    }
+
+    suspend fun addCapturedHarvestPhoto(harvestId: Long, file: File) {
+        try {
+            database.withTransaction {
+                checkNotNull(database.harvestDao().getById(harvestId)) { "Colheita não encontrada." }
+                database.harvestPhotoDao().insert(HarvestPhoto(harvestId = harvestId, localPath = file.absolutePath))
+            }
+        } catch (error: Throwable) {
+            photoStore.delete(file.absolutePath)
+            throw error
+        }
+    }
+
+    suspend fun deleteHarvestPhoto(photo: HarvestPhoto) {
+        database.harvestPhotoDao().delete(photo.id)
+        photoStore.delete(photo.localPath)
+    }
+
+    suspend fun addHarvest(cultivationId: Long, quantity: Double, unit: String, harvestedAt: Long, notes: String) {
+        require(quantity > 0.0 && quantity.isFinite()) { "A quantidade da colheita deve ser maior que zero." }
+        require(unit.isNotBlank()) { "Informe a unidade da colheita." }
+        database.withTransaction {
+            checkNotNull(dao.getById(cultivationId)) { "Cultivo não encontrado." }
+            val number = database.harvestDao().nextNumber(cultivationId)
+            database.harvestDao().insert(Harvest(cultivationId = cultivationId, number = number, harvestedAt = harvestedAt, quantity = quantity, unit = unit.trim(), notes = notes.trim()))
+            database.eventDao().insert(CultivationEvent(cultivationId = cultivationId, type = "Colheita", description = "Colheita $number — ${quantity} ${unit.trim()}${notes.trim().takeIf(String::isNotEmpty)?.let { " · $it" }.orEmpty()}", occurredAt = harvestedAt, stage = "Colheita"))
+        }
+    }
+
+    suspend fun deleteHarvest(harvest: Harvest) {
+        val photos = database.harvestPhotoDao().getForHarvest(harvest.id)
+        database.withTransaction {
+            database.harvestDao().delete(harvest.id)
+            database.eventDao().insert(CultivationEvent(cultivationId = harvest.cultivationId, type = "Nota", description = "Colheita ${harvest.number} removida do registro."))
+        }
+        photos.forEach { photoStore.delete(it.localPath) }
+    }
 
     suspend fun save(cultivation: Cultivation): Long = database.withTransaction {
         val sourceCulture = cultivation.sourceCultureId?.let { database.cultureDao().getById(it) }

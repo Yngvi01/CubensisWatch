@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Cultivation::class, Culture::class, Lineage::class, CulturePhoto::class, CultivationEvent::class, Photo::class, Incubator::class, IncubatorReading::class, Material::class, StockMovement::class, ShoppingItem::class, Reminder::class], version = 6, exportSchema = true)
+@Database(entities = [Cultivation::class, Culture::class, Lineage::class, CulturePhoto::class, CultivationEvent::class, Photo::class, Incubator::class, IncubatorReading::class, Material::class, StockMovement::class, ShoppingItem::class, Reminder::class, Harvest::class, HarvestPhoto::class, Note::class, NotePhoto::class, MaterialPhoto::class], version = 11, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun cultivationDao(): CultivationDao
     abstract fun eventDao(): CultivationEventDao
@@ -18,6 +18,11 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun incubatorDao(): IncubatorDao
     abstract fun materialDao(): MaterialDao
     abstract fun reminderDao(): ReminderDao
+    abstract fun harvestDao(): HarvestDao
+    abstract fun harvestPhotoDao(): HarvestPhotoDao
+    abstract fun noteDao(): NoteDao
+    abstract fun notePhotoDao(): NotePhotoDao
+    abstract fun materialPhotoDao(): MaterialPhotoDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -99,6 +104,37 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_reminders_enabled ON reminders(enabled)")
             }
         }
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS harvests (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, cultivationId INTEGER NOT NULL, number INTEGER NOT NULL, harvestedAt INTEGER NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, notes TEXT NOT NULL, FOREIGN KEY(cultivationId) REFERENCES cultivations(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_harvests_cultivationId ON harvests(cultivationId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_harvests_cultivationId_number ON harvests(cultivationId, number)")
+            }
+        }
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS harvest_photos (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, harvestId INTEGER NOT NULL, localPath TEXT NOT NULL, caption TEXT NOT NULL, capturedAt INTEGER NOT NULL, FOREIGN KEY(harvestId) REFERENCES harvests(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_harvest_photos_harvestId ON harvest_photos(harvestId)")
+            }
+        }
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, title TEXT NOT NULL, text TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, tags TEXT NOT NULL, relatedType TEXT, relatedId INTEGER)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_notes_updatedAt ON notes(updatedAt)")
+            }
+        }
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS note_photos (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, noteId INTEGER NOT NULL, localPath TEXT NOT NULL, caption TEXT NOT NULL, capturedAt INTEGER NOT NULL, FOREIGN KEY(noteId) REFERENCES notes(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_note_photos_noteId ON note_photos(noteId)")
+            }
+        }
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS material_photos (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, materialId INTEGER NOT NULL, localPath TEXT NOT NULL, caption TEXT NOT NULL, capturedAt INTEGER NOT NULL, FOREIGN KEY(materialId) REFERENCES materials(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_material_photos_materialId ON material_photos(materialId)")
+            }
+        }
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
     }
 }

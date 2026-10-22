@@ -64,8 +64,8 @@ fun IncubatorEditorScreen(initial: Incubator?, vm: IncubatorViewModel, onSaved: 
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancelar") }
             Button(onClick = {
-                val temp = temperature.trim().takeIf(String::isNotEmpty)?.toDoubleOrNull()
-                val hum = humidity.trim().takeIf(String::isNotEmpty)?.toDoubleOrNull()
+                val temp = temperature.trim().replace(',', '.').takeIf(String::isNotEmpty)?.toDoubleOrNull()
+                val hum = humidity.trim().replace(',', '.').takeIf(String::isNotEmpty)?.toDoubleOrNull()
                 if (temperature.isNotBlank() && temp == null || humidity.isNotBlank() && hum == null) vm.reportError("Temperatura e umidade devem ser números válidos.")
                 else vm.save(Incubator(initial?.id ?: 0, name, code, location, description, temp, hum, notes), onSaved)
             }, modifier = Modifier.weight(1f)) { Text("Salvar") }
@@ -95,8 +95,8 @@ fun IncubatorDetailScreen(id: Long, vm: IncubatorViewModel, onEdit: () -> Unit) 
         item { OutlinedTextField(humidity, { humidity = it }, label = { Text("Umidade (%)") }, modifier = Modifier.fillMaxWidth()) }
         item { OutlinedTextField(notes, { notes = it }, label = { Text("Observação") }, modifier = Modifier.fillMaxWidth()) }
         item { Button(onClick = {
-            val temp = temperature.trim().takeIf(String::isNotEmpty)?.toDoubleOrNull()
-            val hum = humidity.trim().takeIf(String::isNotEmpty)?.toDoubleOrNull()
+            val temp = temperature.trim().replace(',', '.').takeIf(String::isNotEmpty)?.toDoubleOrNull()
+            val hum = humidity.trim().replace(',', '.').takeIf(String::isNotEmpty)?.toDoubleOrNull()
             if (temperature.isNotBlank() && temp == null || humidity.isNotBlank() && hum == null) vm.reportError("Temperatura e umidade devem ser números válidos.")
             else { vm.addReading(IncubatorReading(incubatorId = id, temperature = temp, humidity = hum, notes = notes)); temperature = ""; humidity = ""; notes = "" }
         }, modifier = Modifier.fillMaxWidth()) { Text("Registrar") } }

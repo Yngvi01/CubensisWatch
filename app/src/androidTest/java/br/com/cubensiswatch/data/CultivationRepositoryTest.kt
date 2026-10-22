@@ -47,4 +47,19 @@ class CultivationRepositoryTest {
         assertEquals(emptyList<CultivationEvent>(), repository.observeEvents(id).first())
         assertEquals(emptyList<Photo>(), repository.observePhotos(id).first())
     }
+
+    @Test
+    fun harvestsAreNumberedPersistedAndCascadeWithCultivation() = runBlocking {
+        val id = repository.save(Cultivation(code = "CT-002", name = "Cultivo com colheitas"))
+        repository.addHarvest(id, 120.0, "g", 2_000L, "Primeira leva")
+        repository.addHarvest(id, 0.18, "kg", 3_000L, "Segunda leva")
+
+        val harvests = repository.observeHarvests(id).first()
+        assertEquals(listOf(1, 2), harvests.map { it.number })
+        assertEquals(listOf(120.0, 0.18), harvests.map { it.quantity })
+        assertEquals(listOf("Colheita", "Colheita"), repository.observeEvents(id).first().filter { it.type == "Colheita" }.map { it.type })
+
+        repository.deleteCultivation(checkNotNull(database.cultivationDao().getById(id)))
+        assertEquals(emptyList<Harvest>(), repository.observeHarvests(id).first())
+    }
 }

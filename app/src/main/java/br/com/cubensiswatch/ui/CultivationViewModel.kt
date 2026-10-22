@@ -7,6 +7,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import br.com.cubensiswatch.data.Cultivation
 import br.com.cubensiswatch.data.CultivationRepository
+import br.com.cubensiswatch.data.Harvest
+import br.com.cubensiswatch.data.HarvestPhoto
 import br.com.cubensiswatch.data.Photo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,12 +16,15 @@ import kotlinx.coroutines.launch
 
 class CultivationViewModel(private val repository: CultivationRepository) : ViewModel() {
     val cultivations = repository.cultivations
+    val recentEvents = repository.observeRecentEvents()
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
 
     fun cultivation(id: Long) = repository.observeCultivation(id)
     fun events(id: Long) = repository.observeEvents(id)
     fun photos(id: Long) = repository.observePhotos(id)
+    fun harvests(id: Long) = repository.observeHarvests(id)
+    fun harvestPhotos(id: Long) = repository.observeHarvestPhotos(id)
     fun clearError() { _error.value = null }
     fun reportError(message: String) { _error.value = message }
 
@@ -63,9 +68,10 @@ class CultivationViewModel(private val repository: CultivationRepository) : View
             .onFailure { _error.value = it.message ?: "Não foi possível salvar a observação." }
     }
 
-    fun addPhotos(id: Long, uris: List<Uri>, caption: String) = viewModelScope.launch {
+    fun addPhotos(id: Long, uris: List<Uri>, caption: String, onSaved: () -> Unit = {}) = viewModelScope.launch {
         _error.value = null
         runCatching { repository.addPhotos(id, uris, caption.trim()) }
+            .onSuccess { onSaved() }
             .onFailure { _error.value = it.message ?: "Não foi possível importar as fotos." }
     }
 
@@ -75,8 +81,9 @@ class CultivationViewModel(private val repository: CultivationRepository) : View
             .onFailure { _error.value = it.message ?: "Não foi possível preparar a câmera." }
     }
 
-    fun addCapturedPhoto(id: Long, file: File, caption: String) = viewModelScope.launch {
+    fun addCapturedPhoto(id: Long, file: File, caption: String, onSaved: () -> Unit = {}) = viewModelScope.launch {
         runCatching { repository.addCapturedPhoto(id, file, caption.trim()) }
+            .onSuccess { onSaved() }
             .onFailure { _error.value = it.message ?: "Não foi possível salvar a foto." }
     }
 
@@ -84,6 +91,45 @@ class CultivationViewModel(private val repository: CultivationRepository) : View
         _error.value = null
         runCatching { repository.deletePhoto(photo) }
             .onFailure { _error.value = it.message ?: "Não foi possível excluir a foto." }
+    }
+
+    fun addHarvest(id: Long, quantity: String, unit: String, harvestedAt: Long, notes: String) = viewModelScope.launch {
+        val parsedQuantity = quantity.trim().replace(',', '.').toDoubleOrNull()
+        if (parsedQuantity == null || !parsedQuantity.isFinite() || parsedQuantity <= 0.0) {
+            _error.value = "Informe uma quantidade válida maior que zero."
+            return@launch
+        }
+        if (unit.isBlank()) {
+            _error.value = "Informe a unidade da colheita."
+            return@launch
+        }
+        _error.value = null
+        runCatching { repository.addHarvest(id, parsedQuantity, unit, harvestedAt, notes) }
+            .onFailure { _error.value = it.message ?: "Não foi possível registrar a colheita." }
+    }
+
+    fun deleteHarvest(harvest: Harvest) = viewModelScope.launch {
+        _error.value = null
+        runCatching { repository.deleteHarvest(harvest) }
+            .onFailure { _error.value = it.message ?: "Não foi possível remover a colheita." }
+    }
+
+    fun addHarvestPhotos(harvest: Harvest, uris: List<Uri>) = viewModelScope.launch {
+        _error.value = null
+        runCatching { repository.addHarvestPhotos(harvest.id, uris) }
+            .onFailure { _error.value = it.message ?: "Não foi possível importar as fotos da colheita." }
+    }
+
+    fun addCapturedHarvestPhoto(harvestId: Long, file: File) = viewModelScope.launch {
+        _error.value = null
+        runCatching { repository.addCapturedHarvestPhoto(harvestId, file) }
+            .onFailure { _error.value = it.message ?: "Não foi possível salvar a foto da colheita." }
+    }
+
+    fun deleteHarvestPhoto(photo: HarvestPhoto) = viewModelScope.launch {
+        _error.value = null
+        runCatching { repository.deleteHarvestPhoto(photo) }
+            .onFailure { _error.value = it.message ?: "Não foi possível excluir a foto da colheita." }
     }
 
     fun delete(cultivation: Cultivation, onDeleted: () -> Unit) = viewModelScope.launch {

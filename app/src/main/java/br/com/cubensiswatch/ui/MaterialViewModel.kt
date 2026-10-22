@@ -7,6 +7,8 @@ import br.com.cubensiswatch.data.Material
 import br.com.cubensiswatch.data.MaterialRepository
 import br.com.cubensiswatch.data.ShoppingItem
 import br.com.cubensiswatch.data.StockMovement
+import br.com.cubensiswatch.data.MaterialPhoto
+import android.net.Uri
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -21,6 +23,7 @@ class MaterialViewModel(private val repository: MaterialRepository) : ViewModel(
     fun clearError() { _error.value = null }
     fun material(id: Long) = repository.material(id)
     fun movements(id: Long) = repository.movements(id)
+    fun photos(id: Long) = repository.photos(id)
     fun save(item: Material, done: (Long) -> Unit) = viewModelScope.launch {
         _error.value = null
         runCatching { repository.save(item) }.onSuccess(done).onFailure { _error.value = it.message ?: "Não foi possível salvar o material." }
@@ -32,6 +35,16 @@ class MaterialViewModel(private val repository: MaterialRepository) : ViewModel(
     fun addShopping(name: String) = viewModelScope.launch { _error.value = null; runCatching { repository.addShopping(name) }.onFailure { _error.value = it.message ?: "Não foi possível adicionar à lista." } }
     fun check(item: ShoppingItem, checked: Boolean) = viewModelScope.launch { repository.setShoppingChecked(item, checked) }
     fun remove(item: ShoppingItem) = viewModelScope.launch { repository.removeShopping(item) }
+    fun addPhotos(materialId: Long, uris: List<Uri>) = viewModelScope.launch {
+        _error.value = null
+        runCatching { repository.addPhotos(materialId, uris) }
+            .onFailure { _error.value = it.message ?: "Não foi possível adicionar as fotos do material." }
+    }
+    fun deletePhoto(photo: MaterialPhoto) = viewModelScope.launch {
+        _error.value = null
+        runCatching { repository.deletePhoto(photo) }
+            .onFailure { _error.value = it.message ?: "Não foi possível excluir a foto do material." }
+    }
     class Factory(private val repository: MaterialRepository) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST") override fun <T : ViewModel> create(modelClass: Class<T>): T = MaterialViewModel(repository) as T
     }

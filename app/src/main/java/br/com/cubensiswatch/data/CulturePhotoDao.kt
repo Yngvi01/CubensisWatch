@@ -16,6 +16,9 @@ interface CulturePhotoDao {
     @Query("SELECT * FROM culture_photos WHERE cultureId = :cultureId")
     suspend fun getForCulture(cultureId: Long): List<CulturePhoto>
 
+    @Query("SELECT localPath FROM culture_photos")
+    suspend fun getAllLocalPaths(): List<String>
+
     @Query("DELETE FROM culture_photos WHERE id = :id")
     suspend fun delete(id: Long)
 }

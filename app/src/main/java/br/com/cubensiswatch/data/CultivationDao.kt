@@ -20,6 +20,9 @@ interface CultivationDao {
     @Query("SELECT COUNT(*) FROM cultivations WHERE status = 'Incubação'")
     fun observeIncubatingCount(): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM cultivations WHERE status = 'Contaminado'")
+    fun observeProblemCount(): Flow<Int>
+
     @Query("SELECT * FROM cultivations WHERE id = :id")
     fun observeById(id: Long): Flow<Cultivation?>
 
